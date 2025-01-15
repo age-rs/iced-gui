@@ -1,12 +1,16 @@
+use iced::keyboard;
 use iced::widget::{
-    button, checkbox, column, container, horizontal_rule, pick_list,
-    progress_bar, row, scrollable, slider, text, text_input, toggler,
-    vertical_rule, vertical_space,
+    button, center, checkbox, column, horizontal_rule, pick_list, progress_bar,
+    row, scrollable, slider, text, text_input, toggler, vertical_rule,
+    vertical_space,
 };
-use iced::{Alignment, Element, Length, Sandbox, Settings, Theme};
+use iced::{Center, Element, Fill, Subscription, Theme};
 
 pub fn main() -> iced::Result {
-    Styling::run(Settings::default())
+    iced::application("Styling - Iced", Styling::update, Styling::view)
+        .subscription(Styling::subscription)
+        .theme(Styling::theme)
+        .run()
 }
 
 #[derive(Default)]
@@ -26,19 +30,11 @@ enum Message {
     SliderChanged(f32),
     CheckboxToggled(bool),
     TogglerToggled(bool),
+    PreviousTheme,
+    NextTheme,
 }
 
-impl Sandbox for Styling {
-    type Message = Message;
-
-    fn new() -> Self {
-        Styling::default()
-    }
-
-    fn title(&self) -> String {
-        String::from("Styling - Iced")
-    }
-
+impl Styling {
     fn update(&mut self, message: Message) {
         match message {
             Message::ThemeChanged(theme) => {
@@ -49,6 +45,23 @@ impl Sandbox for Styling {
             Message::SliderChanged(value) => self.slider_value = value,
             Message::CheckboxToggled(value) => self.checkbox_value = value,
             Message::TogglerToggled(value) => self.toggler_value = value,
+            Message::PreviousTheme | Message::NextTheme => {
+                if let Some(current) = Theme::ALL
+                    .iter()
+                    .position(|candidate| &self.theme == candidate)
+                {
+                    self.theme = if matches!(message, Message::NextTheme) {
+                        Theme::ALL[(current + 1) % Theme::ALL.len()].clone()
+                    } else if current == 0 {
+                        Theme::ALL
+                            .last()
+                            .expect("Theme::ALL must not be empty")
+                            .clone()
+                    } else {
+                        Theme::ALL[current - 1].clone()
+                    };
+                }
+            }
         }
     }
 
@@ -56,7 +69,7 @@ impl Sandbox for Styling {
         let choose_theme = column![
             text("Theme:"),
             pick_list(Theme::ALL, Some(&self.theme), Message::ThemeChanged)
-                .width(Length::Fill),
+                .width(Fill),
         ]
         .spacing(10);
 
@@ -65,9 +78,16 @@ impl Sandbox for Styling {
             .padding(10)
             .size(20);
 
-        let button = button("Submit")
-            .padding(10)
-            .on_press(Message::ButtonPressed);
+        let styled_button = |label| {
+            button(text(label).width(Fill).center())
+                .padding(10)
+                .on_press(Message::ButtonPressed)
+        };
+
+        let primary = styled_button("Primary");
+        let success = styled_button("Success").style(button::success);
+        let warning = styled_button("Warning").style(button::warning);
+        let danger = styled_button("Danger").style(button::danger);
 
         let slider =
             slider(0.0..=100.0, self.slider_value, Message::SliderChanged);
@@ -79,26 +99,24 @@ impl Sandbox for Styling {
             vertical_space().height(800),
             "You did it!"
         ])
-        .width(Length::Fill)
+        .width(Fill)
         .height(100);
 
         let checkbox = checkbox("Check me!", self.checkbox_value)
             .on_toggle(Message::CheckboxToggled);
 
-        let toggler = toggler(
-            String::from("Toggle me!"),
-            self.toggler_value,
-            Message::TogglerToggled,
-        )
-        .width(Length::Shrink)
-        .spacing(10);
+        let toggler = toggler(self.toggler_value)
+            .label("Toggle me!")
+            .on_toggle(Message::TogglerToggled)
+            .spacing(10);
 
         let content = column![
             choose_theme,
             horizontal_rule(38),
-            row![text_input, button]
+            text_input,
+            row![primary, success, warning, danger]
                 .spacing(10)
-                .align_items(Alignment::Center),
+                .align_y(Center),
             slider,
             progress_bar,
             row![
@@ -108,18 +126,26 @@ impl Sandbox for Styling {
             ]
             .spacing(10)
             .height(100)
-            .align_items(Alignment::Center),
+            .align_y(Center),
         ]
         .spacing(20)
         .padding(20)
         .max_width(600);
 
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y()
-            .into()
+        center(content).into()
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        keyboard::on_key_press(|key, _modifiers| match key {
+            keyboard::Key::Named(
+                keyboard::key::Named::ArrowUp | keyboard::key::Named::ArrowLeft,
+            ) => Some(Message::PreviousTheme),
+            keyboard::Key::Named(
+                keyboard::key::Named::ArrowDown
+                | keyboard::key::Named::ArrowRight,
+            ) => Some(Message::NextTheme),
+            _ => None,
+        })
     }
 
     fn theme(&self) -> Theme {

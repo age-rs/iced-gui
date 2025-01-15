@@ -1,50 +1,68 @@
-use iced::widget::{button, column, text};
-use iced::{Alignment, Element, Sandbox, Settings};
+use iced::widget::{button, column, text, Column};
+use iced::Center;
 
 pub fn main() -> iced::Result {
-    Counter::run(Settings::default())
+    iced::run("A cool counter", Counter::update, Counter::view)
 }
 
+#[derive(Default)]
 struct Counter {
-    value: i32,
+    value: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum Message {
-    IncrementPressed,
-    DecrementPressed,
+    Increment,
+    Decrement,
 }
 
-impl Sandbox for Counter {
-    type Message = Message;
-
-    fn new() -> Self {
-        Self { value: 0 }
-    }
-
-    fn title(&self) -> String {
-        String::from("Counter - Iced")
-    }
-
+impl Counter {
     fn update(&mut self, message: Message) {
         match message {
-            Message::IncrementPressed => {
+            Message::Increment => {
                 self.value += 1;
             }
-            Message::DecrementPressed => {
+            Message::Decrement => {
                 self.value -= 1;
             }
         }
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Column<Message> {
         column![
-            button("Increment").on_press(Message::IncrementPressed),
+            button("Increment").on_press(Message::Increment),
             text(self.value).size(50),
-            button("Decrement").on_press(Message::DecrementPressed)
+            button("Decrement").on_press(Message::Decrement)
         ]
         .padding(20)
-        .align_items(Alignment::Center)
-        .into()
+        .align_x(Center)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced_test::selector::text;
+    use iced_test::{simulator, Error};
+
+    #[test]
+    fn it_counts() -> Result<(), Error> {
+        let mut counter = Counter { value: 0 };
+        let mut ui = simulator(counter.view());
+
+        let _ = ui.click(text("Increment"))?;
+        let _ = ui.click(text("Increment"))?;
+        let _ = ui.click(text("Decrement"))?;
+
+        for message in ui.into_messages() {
+            counter.update(message);
+        }
+
+        assert_eq!(counter.value, 1);
+
+        let mut ui = simulator(counter.view());
+        assert!(ui.find(text("1")).is_ok(), "Counter should display 1!");
+
+        Ok(())
     }
 }

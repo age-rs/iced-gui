@@ -1,12 +1,40 @@
-//! Display an interactive selector of a single value from a range of values.
+//! Sliders let users set a value by moving an indicator.
+//!
+//! # Example
+//! ```no_run
+//! # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+//! # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+//! #
+//! use iced::widget::slider;
+//!
+//! struct State {
+//!    value: f32,
+//! }
+//!
+//! #[derive(Debug, Clone)]
+//! enum Message {
+//!     ValueChanged(f32),
+//! }
+//!
+//! fn view(state: &State) -> Element<'_, Message> {
+//!     slider(0.0..=100.0, state.value, Message::ValueChanged).into()
+//! }
+//!
+//! fn update(state: &mut State, message: Message) {
+//!     match message {
+//!         Message::ValueChanged(value) => {
+//!             state.value = value;
+//!         }
+//!     }
+//! }
+//! ```
 use std::ops::RangeInclusive;
 
 pub use crate::slider::{
-    default, Appearance, DefaultStyle, Handle, HandleShape, Status, Style,
+    default, Catalog, Handle, HandleShape, Status, Style, StyleFn,
 };
 
-use crate::core;
-use crate::core::event::{self, Event};
+use crate::core::border::Border;
 use crate::core::keyboard;
 use crate::core::keyboard::key::{self, Key};
 use crate::core::layout::{self, Layout};
@@ -15,8 +43,8 @@ use crate::core::renderer;
 use crate::core::touch;
 use crate::core::widget::tree::{self, Tree};
 use crate::core::{
-    Border, Clipboard, Element, Length, Pixels, Point, Rectangle, Shell, Size,
-    Widget,
+    self, Clipboard, Element, Event, Length, Pixels, Point, Rectangle, Shell,
+    Size, Widget,
 };
 
 /// An vertical bar and a handle that selects a single value from a range of
@@ -29,19 +57,37 @@ use crate::core::{
 ///
 /// # Example
 /// ```no_run
-/// # type VerticalSlider<'a, T, Message> = iced_widget::VerticalSlider<'a, T, Message>;
+/// # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+/// # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
 /// #
-/// #[derive(Clone)]
-/// pub enum Message {
-///     SliderChanged(f32),
+/// use iced::widget::vertical_slider;
+///
+/// struct State {
+///    value: f32,
 /// }
 ///
-/// let value = 50.0;
+/// #[derive(Debug, Clone)]
+/// enum Message {
+///     ValueChanged(f32),
+/// }
 ///
-/// VerticalSlider::new(0.0..=100.0, value, Message::SliderChanged);
+/// fn view(state: &State) -> Element<'_, Message> {
+///     vertical_slider(0.0..=100.0, state.value, Message::ValueChanged).into()
+/// }
+///
+/// fn update(state: &mut State, message: Message) {
+///     match message {
+///         Message::ValueChanged(value) => {
+///             state.value = value;
+///         }
+///     }
+/// }
 /// ```
 #[allow(missing_debug_implementations)]
-pub struct VerticalSlider<'a, T, Message, Theme = crate::Theme> {
+pub struct VerticalSlider<'a, T, Message, Theme = crate::Theme>
+where
+    Theme: Catalog,
+{
     range: RangeInclusive<T>,
     step: T,
     shift_step: Option<T>,
@@ -51,13 +97,14 @@ pub struct VerticalSlider<'a, T, Message, Theme = crate::Theme> {
     on_release: Option<Message>,
     width: f32,
     height: Length,
-    style: Style<Theme>,
+    class: Theme::Class<'a>,
 }
 
 impl<'a, T, Message, Theme> VerticalSlider<'a, T, Message, Theme>
 where
     T: Copy + From<u8> + std::cmp::PartialOrd,
     Message: Clone,
+    Theme: Catalog,
 {
     /// The default width of a [`VerticalSlider`].
     pub const DEFAULT_WIDTH: f32 = 16.0;
@@ -68,11 +115,10 @@ where
     ///   * an inclusive range of possible values
     ///   * the current value of the [`VerticalSlider`]
     ///   * a function that will be called when the [`VerticalSlider`] is dragged.
-    ///   It receives the new value of the [`VerticalSlider`] and must produce a
-    ///   `Message`.
+    ///     It receives the new value of the [`VerticalSlider`] and must produce a
+    ///     `Message`.
     pub fn new<F>(range: RangeInclusive<T>, value: T, on_change: F) -> Self
     where
-        Theme: DefaultStyle,
         F: 'a + Fn(T) -> Message,
     {
         let value = if value >= *range.start() {
@@ -97,7 +143,7 @@ where
             on_release: None,
             width: Self::DEFAULT_WIDTH,
             height: Length::Fill,
-            style: Theme::default_style(),
+            class: Theme::default(),
         }
     }
 
@@ -132,12 +178,6 @@ where
         self
     }
 
-    /// Sets the style of the [`VerticalSlider`].
-    pub fn style(mut self, style: fn(&Theme, Status) -> Appearance) -> Self {
-        self.style = style.into();
-        self
-    }
-
     /// Sets the step size of the [`VerticalSlider`].
     pub fn step(mut self, step: T) -> Self {
         self.step = step;
@@ -151,13 +191,32 @@ where
         self.shift_step = Some(shift_step.into());
         self
     }
+
+    /// Sets the style of the [`VerticalSlider`].
+    #[must_use]
+    pub fn style(mut self, style: impl Fn(&Theme, Status) -> Style + 'a) -> Self
+    where
+        Theme::Class<'a>: From<StyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets the style class of the [`VerticalSlider`].
+    #[cfg(feature = "advanced")]
+    #[must_use]
+    pub fn class(mut self, class: impl Into<Theme::Class<'a>>) -> Self {
+        self.class = class.into();
+        self
+    }
 }
 
-impl<'a, T, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for VerticalSlider<'a, T, Message, Theme>
+impl<T, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for VerticalSlider<'_, T, Message, Theme>
 where
     T: Copy + Into<f64> + num_traits::FromPrimitive,
     Message: Clone,
+    Theme: Catalog,
     Renderer: core::Renderer,
 {
     fn tag(&self) -> tree::Tag {
@@ -184,7 +243,7 @@ where
         layout::atomic(limits, self.width, self.height)
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
         event: Event,
@@ -194,7 +253,7 @@ where
         _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         let state = tree.state.downcast_mut::<State>();
         let is_dragging = state.is_dragging;
         let current_value = self.value;
@@ -224,7 +283,7 @@ where
                 let steps = (percent * (end - start) / step).round();
                 let value = steps * step + start;
 
-                T::from_f64(value)
+                T::from_f64(value.min(end))
             };
 
             new_value
@@ -290,7 +349,7 @@ where
                         state.is_dragging = true;
                     }
 
-                    return event::Status::Captured;
+                    shell.capture_event();
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
@@ -302,7 +361,7 @@ where
                     }
                     state.is_dragging = false;
 
-                    return event::Status::Captured;
+                    shell.capture_event();
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
@@ -310,11 +369,29 @@ where
                 if is_dragging {
                     let _ = cursor.position().and_then(locate).map(change);
 
-                    return event::Status::Captured;
+                    shell.capture_event();
+                }
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if state.keyboard_modifiers.control() =>
+            {
+                if cursor.is_over(layout.bounds()) {
+                    let delta = match delta {
+                        mouse::ScrollDelta::Lines { x: _, y } => y,
+                        mouse::ScrollDelta::Pixels { x: _, y } => y,
+                    };
+
+                    if delta < 0.0 {
+                        let _ = decrement(current_value).map(change);
+                    } else {
+                        let _ = increment(current_value).map(change);
+                    }
+
+                    shell.capture_event();
                 }
             }
             Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
-                if cursor.position_over(layout.bounds()).is_some() {
+                if cursor.is_over(layout.bounds()) {
                     match key {
                         Key::Named(key::Named::ArrowUp) => {
                             let _ = increment(current_value).map(change);
@@ -325,7 +402,7 @@ where
                         _ => (),
                     }
 
-                    return event::Status::Captured;
+                    shell.capture_event();
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
@@ -333,8 +410,6 @@ where
             }
             _ => {}
         }
-
-        event::Status::Ignored
     }
 
     fn draw(
@@ -351,8 +426,8 @@ where
         let bounds = layout.bounds();
         let is_mouse_over = cursor.is_over(bounds);
 
-        let style = (self.style)(
-            theme,
+        let style = theme.style(
+            &self.class,
             if state.is_dragging {
                 Status::Dragged
             } else if is_mouse_over {
@@ -397,10 +472,10 @@ where
                     width: style.rail.width,
                     height: offset + handle_width / 2.0,
                 },
-                border: Border::rounded(style.rail.border_radius),
+                border: style.rail.border,
                 ..renderer::Quad::default()
             },
-            style.rail.colors.1,
+            style.rail.backgrounds.1,
         );
 
         renderer.fill_quad(
@@ -411,10 +486,10 @@ where
                     width: style.rail.width,
                     height: bounds.height - offset - handle_width / 2.0,
                 },
-                border: Border::rounded(style.rail.border_radius),
+                border: style.rail.border,
                 ..renderer::Quad::default()
             },
-            style.rail.colors.0,
+            style.rail.backgrounds.0,
         );
 
         renderer.fill_quad(
@@ -432,7 +507,7 @@ where
                 },
                 ..renderer::Quad::default()
             },
-            style.handle.color,
+            style.handle.background,
         );
     }
 
@@ -464,7 +539,7 @@ impl<'a, T, Message, Theme, Renderer>
 where
     T: Copy + Into<f64> + num_traits::FromPrimitive + 'a,
     Message: Clone + 'a,
-    Theme: 'a,
+    Theme: Catalog + 'a,
     Renderer: core::Renderer + 'a,
 {
     fn from(

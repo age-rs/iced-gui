@@ -1,6 +1,36 @@
-//! Show toggle controls using togglers.
+//! Togglers let users make binary choices by toggling a switch.
+//!
+//! # Example
+//! ```no_run
+//! # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+//! # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+//! #
+//! use iced::widget::toggler;
+//!
+//! struct State {
+//!    is_checked: bool,
+//! }
+//!
+//! enum Message {
+//!     TogglerToggled(bool),
+//! }
+//!
+//! fn view(state: &State) -> Element<'_, Message> {
+//!     toggler(state.is_checked)
+//!         .label("Toggle me!")
+//!         .on_toggle(Message::TogglerToggled)
+//!         .into()
+//! }
+//!
+//! fn update(state: &mut State, message: Message) {
+//!     match message {
+//!         Message::TogglerToggled(is_checked) => {
+//!             state.is_checked = is_checked;
+//!         }
+//!     }
+//! }
+//! ```
 use crate::core::alignment;
-use crate::core::event;
 use crate::core::layout;
 use crate::core::mouse;
 use crate::core::renderer;
@@ -8,6 +38,7 @@ use crate::core::text;
 use crate::core::touch;
 use crate::core::widget;
 use crate::core::widget::tree::{self, Tree};
+use crate::core::window;
 use crate::core::{
     Border, Clipboard, Color, Element, Event, Layout, Length, Pixels,
     Rectangle, Shell, Size, Theme, Widget,
@@ -16,17 +47,34 @@ use crate::core::{
 /// A toggler widget.
 ///
 /// # Example
-///
 /// ```no_run
-/// # type Toggler<'a, Message> = iced_widget::Toggler<'a, Message>;
+/// # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+/// # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
 /// #
-/// pub enum Message {
+/// use iced::widget::toggler;
+///
+/// struct State {
+///    is_checked: bool,
+/// }
+///
+/// enum Message {
 ///     TogglerToggled(bool),
 /// }
 ///
-/// let is_toggled = true;
+/// fn view(state: &State) -> Element<'_, Message> {
+///     toggler(state.is_checked)
+///         .label("Toggle me!")
+///         .on_toggle(Message::TogglerToggled)
+///         .into()
+/// }
 ///
-/// Toggler::new(String::from("Toggle me!"), is_toggled, |b| Message::TogglerToggled(b));
+/// fn update(state: &mut State, message: Message) {
+///     match message {
+///         Message::TogglerToggled(is_checked) => {
+///             state.is_checked = is_checked;
+///         }
+///     }
+/// }
 /// ```
 #[allow(missing_debug_implementations)]
 pub struct Toggler<
@@ -35,24 +83,28 @@ pub struct Toggler<
     Theme = crate::Theme,
     Renderer = crate::Renderer,
 > where
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     is_toggled: bool,
-    on_toggle: Box<dyn Fn(bool) -> Message + 'a>,
-    label: Option<String>,
+    on_toggle: Option<Box<dyn Fn(bool) -> Message + 'a>>,
+    label: Option<text::Fragment<'a>>,
     width: Length,
     size: f32,
     text_size: Option<Pixels>,
     text_line_height: text::LineHeight,
     text_alignment: alignment::Horizontal,
     text_shaping: text::Shaping,
+    text_wrapping: text::Wrapping,
     spacing: f32,
     font: Option<Renderer::Font>,
-    style: Style<Theme>,
+    class: Theme::Class<'a>,
+    last_status: Option<Status>,
 }
 
 impl<'a, Message, Theme, Renderer> Toggler<'a, Message, Theme, Renderer>
 where
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     /// The default size of a [`Toggler`].
@@ -66,29 +118,53 @@ where
     ///   * a function that will be called when the [`Toggler`] is toggled. It
     ///     will receive the new state of the [`Toggler`] and must produce a
     ///     `Message`.
-    pub fn new<F>(
-        label: impl Into<Option<String>>,
-        is_toggled: bool,
-        f: F,
-    ) -> Self
-    where
-        Theme: DefaultStyle,
-        F: 'a + Fn(bool) -> Message,
-    {
+    pub fn new(is_toggled: bool) -> Self {
         Toggler {
             is_toggled,
-            on_toggle: Box::new(f),
-            label: label.into(),
-            width: Length::Fill,
+            on_toggle: None,
+            label: None,
+            width: Length::Shrink,
             size: Self::DEFAULT_SIZE,
             text_size: None,
             text_line_height: text::LineHeight::default(),
             text_alignment: alignment::Horizontal::Left,
-            text_shaping: text::Shaping::Basic,
+            text_shaping: text::Shaping::default(),
+            text_wrapping: text::Wrapping::default(),
             spacing: Self::DEFAULT_SIZE / 2.0,
             font: None,
-            style: Theme::default_style(),
+            class: Theme::default(),
+            last_status: None,
         }
+    }
+
+    /// Sets the label of the [`Toggler`].
+    pub fn label(mut self, label: impl text::IntoFragment<'a>) -> Self {
+        self.label = Some(label.into_fragment());
+        self
+    }
+
+    /// Sets the message that should be produced when a user toggles
+    /// the [`Toggler`].
+    ///
+    /// If this method is not called, the [`Toggler`] will be disabled.
+    pub fn on_toggle(
+        mut self,
+        on_toggle: impl Fn(bool) -> Message + 'a,
+    ) -> Self {
+        self.on_toggle = Some(Box::new(on_toggle));
+        self
+    }
+
+    /// Sets the message that should be produced when a user toggles
+    /// the [`Toggler`], if `Some`.
+    ///
+    /// If `None`, the [`Toggler`] will be disabled.
+    pub fn on_toggle_maybe(
+        mut self,
+        on_toggle: Option<impl Fn(bool) -> Message + 'a>,
+    ) -> Self {
+        self.on_toggle = on_toggle.map(|on_toggle| Box::new(on_toggle) as _);
+        self
     }
 
     /// Sets the size of the [`Toggler`].
@@ -130,6 +206,12 @@ where
         self
     }
 
+    /// Sets the [`text::Wrapping`] strategy of the [`Toggler`].
+    pub fn text_wrapping(mut self, wrapping: text::Wrapping) -> Self {
+        self.text_wrapping = wrapping;
+        self
+    }
+
     /// Sets the spacing between the [`Toggler`] and the text.
     pub fn spacing(mut self, spacing: impl Into<Pixels>) -> Self {
         self.spacing = spacing.into().0;
@@ -145,15 +227,28 @@ where
     }
 
     /// Sets the style of the [`Toggler`].
-    pub fn style(mut self, style: fn(&Theme, Status) -> Appearance) -> Self {
-        self.style = style.into();
+    #[must_use]
+    pub fn style(mut self, style: impl Fn(&Theme, Status) -> Style + 'a) -> Self
+    where
+        Theme::Class<'a>: From<StyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets the style class of the [`Toggler`].
+    #[cfg(feature = "advanced")]
+    #[must_use]
+    pub fn class(mut self, class: impl Into<Theme::Class<'a>>) -> Self {
+        self.class = class.into();
         self
     }
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for Toggler<'a, Message, Theme, Renderer>
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Toggler<'_, Message, Theme, Renderer>
 where
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     fn tag(&self) -> tree::Tag {
@@ -202,6 +297,7 @@ where
                         self.text_alignment,
                         alignment::Vertical::Top,
                         self.text_shaping,
+                        self.text_wrapping,
                     )
                 } else {
                     layout::Node::new(Size::ZERO)
@@ -210,7 +306,7 @@ where
         )
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         _state: &mut Tree,
         event: Event,
@@ -220,21 +316,43 @@ where
         _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
+        let Some(on_toggle) = &self.on_toggle else {
+            return;
+        };
+
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 let mouse_over = cursor.is_over(layout.bounds());
 
                 if mouse_over {
-                    shell.publish((self.on_toggle)(!self.is_toggled));
-
-                    event::Status::Captured
-                } else {
-                    event::Status::Ignored
+                    shell.publish(on_toggle(!self.is_toggled));
+                    shell.capture_event();
                 }
             }
-            _ => event::Status::Ignored,
+            _ => {}
+        }
+
+        let current_status = if self.on_toggle.is_none() {
+            Status::Disabled
+        } else if cursor.is_over(layout.bounds()) {
+            Status::Hovered {
+                is_toggled: self.is_toggled,
+            }
+        } else {
+            Status::Active {
+                is_toggled: self.is_toggled,
+            }
+        };
+
+        if let Event::Window(window::Event::RedrawRequested(_now)) = event {
+            self.last_status = Some(current_status);
+        } else if self
+            .last_status
+            .is_some_and(|status| status != current_status)
+        {
+            shell.request_redraw();
         }
     }
 
@@ -247,7 +365,11 @@ where
         _renderer: &Renderer,
     ) -> mouse::Interaction {
         if cursor.is_over(layout.bounds()) {
-            mouse::Interaction::Pointer
+            if self.on_toggle.is_some() {
+                mouse::Interaction::Pointer
+            } else {
+                mouse::Interaction::NotAllowed
+            }
         } else {
             mouse::Interaction::default()
         }
@@ -260,7 +382,7 @@ where
         theme: &Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
-        cursor: mouse::Cursor,
+        _cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
         /// Makes sure that the border radius of the toggler looks good at every size.
@@ -275,31 +397,22 @@ where
 
         if self.label.is_some() {
             let label_layout = children.next().unwrap();
+            let state: &widget::text::State<Renderer::Paragraph> =
+                tree.state.downcast_ref();
 
             crate::text::draw(
                 renderer,
                 style,
                 label_layout,
-                tree.state.downcast_ref(),
-                crate::text::Appearance::default(),
+                state.0.raw(),
+                crate::text::Style::default(),
                 viewport,
             );
         }
 
         let bounds = toggler_layout.bounds();
-        let is_mouse_over = cursor.is_over(layout.bounds());
-
-        let status = if is_mouse_over {
-            Status::Hovered {
-                is_toggled: self.is_toggled,
-            }
-        } else {
-            Status::Active {
-                is_toggled: self.is_toggled,
-            }
-        };
-
-        let appearance = (self.style)(theme, status);
+        let style = theme
+            .style(&self.class, self.last_status.unwrap_or(Status::Disabled));
 
         let border_radius = bounds.height / BORDER_RADIUS_RATIO;
         let space = SPACE_RATIO * bounds.height;
@@ -316,12 +429,12 @@ where
                 bounds: toggler_background_bounds,
                 border: Border {
                     radius: border_radius.into(),
-                    width: appearance.background_border_width,
-                    color: appearance.background_border_color,
+                    width: style.background_border_width,
+                    color: style.background_border_color,
                 },
                 ..renderer::Quad::default()
             },
-            appearance.background,
+            style.background,
         );
 
         let toggler_foreground_bounds = Rectangle {
@@ -341,12 +454,12 @@ where
                 bounds: toggler_foreground_bounds,
                 border: Border {
                     radius: border_radius.into(),
-                    width: appearance.foreground_border_width,
-                    color: appearance.foreground_border_color,
+                    width: style.foreground_border_width,
+                    color: style.foreground_border_color,
                 },
                 ..renderer::Quad::default()
             },
-            appearance.foreground,
+            style.foreground,
         );
     }
 }
@@ -355,7 +468,7 @@ impl<'a, Message, Theme, Renderer> From<Toggler<'a, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
-    Theme: 'a,
+    Theme: Catalog + 'a,
     Renderer: text::Renderer + 'a,
 {
     fn from(
@@ -378,11 +491,13 @@ pub enum Status {
         /// Indicates whether the [`Toggler`] is toggled.
         is_toggled: bool,
     },
+    /// The [`Toggler`] is disabled.
+    Disabled,
 }
 
 /// The appearance of a toggler.
-#[derive(Debug, Clone, Copy)]
-pub struct Appearance {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Style {
     /// The background [`Color`] of the toggler.
     pub background: Color,
     /// The width of the background border of the toggler.
@@ -397,29 +512,37 @@ pub struct Appearance {
     pub foreground_border_color: Color,
 }
 
-/// The style of a [`Toggler`].
-pub type Style<Theme> = fn(&Theme, Status) -> Appearance;
+/// The theme catalog of a [`Toggler`].
+pub trait Catalog: Sized {
+    /// The item class of the [`Catalog`].
+    type Class<'a>;
 
-/// The default style of a [`Toggler`].
-pub trait DefaultStyle {
-    /// Returns the default style of a [`Toggler`].
-    fn default_style() -> Style<Self>;
+    /// The default class produced by the [`Catalog`].
+    fn default<'a>() -> Self::Class<'a>;
+
+    /// The [`Style`] of a class with the given status.
+    fn style(&self, class: &Self::Class<'_>, status: Status) -> Style;
 }
 
-impl DefaultStyle for Theme {
-    fn default_style() -> Style<Self> {
-        default
+/// A styling function for a [`Toggler`].
+///
+/// This is just a boxed closure: `Fn(&Theme, Status) -> Style`.
+pub type StyleFn<'a, Theme> = Box<dyn Fn(&Theme, Status) -> Style + 'a>;
+
+impl Catalog for Theme {
+    type Class<'a> = StyleFn<'a, Self>;
+
+    fn default<'a>() -> Self::Class<'a> {
+        Box::new(default)
+    }
+
+    fn style(&self, class: &Self::Class<'_>, status: Status) -> Style {
+        class(self, status)
     }
 }
 
-impl DefaultStyle for Appearance {
-    fn default_style() -> Style<Self> {
-        |appearance, _status| *appearance
-    }
-}
-
 /// The default style of a [`Toggler`].
-pub fn default(theme: &Theme, status: Status) -> Appearance {
+pub fn default(theme: &Theme, status: Status) -> Style {
     let palette = theme.extended_palette();
 
     let background = match status {
@@ -430,6 +553,7 @@ pub fn default(theme: &Theme, status: Status) -> Appearance {
                 palette.background.strong.color
             }
         }
+        Status::Disabled => palette.background.weak.color,
     };
 
     let foreground = match status {
@@ -450,9 +574,10 @@ pub fn default(theme: &Theme, status: Status) -> Appearance {
                 palette.background.weak.color
             }
         }
+        Status::Disabled => palette.background.base.color,
     };
 
-    Appearance {
+    Style {
         background,
         foreground,
         foreground_border_width: 0.0,

@@ -1,59 +1,124 @@
-//! Encode and display information in a QR code.
+//! QR codes display information in a type of two-dimensional matrix barcode.
+//!
+//! # Example
+//! ```no_run
+//! # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+//! # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+//! #
+//! use iced::widget::qr_code;
+//!
+//! struct State {
+//!    data: qr_code::Data,
+//! }
+//!
+//! #[derive(Debug, Clone)]
+//! enum Message {
+//!     // ...
+//! }
+//!
+//! fn view(state: &State) -> Element<'_, Message> {
+//!     qr_code(&state.data).into()
+//! }
+//! ```
 use crate::canvas;
 use crate::core::layout;
 use crate::core::mouse;
 use crate::core::renderer::{self, Renderer as _};
 use crate::core::widget::tree::{self, Tree};
 use crate::core::{
-    Color, Element, Layout, Length, Point, Rectangle, Size, Theme, Vector,
-    Widget,
+    Color, Element, Layout, Length, Pixels, Point, Rectangle, Size, Theme,
+    Vector, Widget,
 };
-use crate::graphics::geometry::Renderer as _;
 use crate::Renderer;
 
 use std::cell::RefCell;
 use thiserror::Error;
 
-const DEFAULT_CELL_SIZE: u16 = 4;
+const DEFAULT_CELL_SIZE: f32 = 4.0;
 const QUIET_ZONE: usize = 2;
 
 /// A type of matrix barcode consisting of squares arranged in a grid which
 /// can be read by an imaging device, such as a camera.
-#[derive(Debug)]
-pub struct QRCode<'a, Theme = crate::Theme> {
+///
+/// # Example
+/// ```no_run
+/// # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+/// # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+/// #
+/// use iced::widget::qr_code;
+///
+/// struct State {
+///    data: qr_code::Data,
+/// }
+///
+/// #[derive(Debug, Clone)]
+/// enum Message {
+///     // ...
+/// }
+///
+/// fn view(state: &State) -> Element<'_, Message> {
+///     qr_code(&state.data).into()
+/// }
+/// ```
+#[allow(missing_debug_implementations)]
+pub struct QRCode<'a, Theme = crate::Theme>
+where
+    Theme: Catalog,
+{
     data: &'a Data,
-    cell_size: u16,
-    style: Style<Theme>,
+    cell_size: f32,
+    class: Theme::Class<'a>,
 }
 
-impl<'a, Theme> QRCode<'a, Theme> {
+impl<'a, Theme> QRCode<'a, Theme>
+where
+    Theme: Catalog,
+{
     /// Creates a new [`QRCode`] with the provided [`Data`].
-    pub fn new(data: &'a Data) -> Self
-    where
-        Theme: DefaultStyle,
-    {
+    pub fn new(data: &'a Data) -> Self {
         Self {
             data,
             cell_size: DEFAULT_CELL_SIZE,
-            style: Theme::default_style(),
+            class: Theme::default(),
         }
     }
 
     /// Sets the size of the squares of the grid cell of the [`QRCode`].
-    pub fn cell_size(mut self, cell_size: u16) -> Self {
-        self.cell_size = cell_size;
+    pub fn cell_size(mut self, cell_size: impl Into<Pixels>) -> Self {
+        self.cell_size = cell_size.into().0;
+        self
+    }
+
+    /// Sets the size of the entire [`QRCode`].
+    pub fn total_size(mut self, total_size: impl Into<Pixels>) -> Self {
+        self.cell_size =
+            total_size.into().0 / (self.data.width + 2 * QUIET_ZONE) as f32;
+
         self
     }
 
     /// Sets the style of the [`QRCode`].
-    pub fn style(mut self, style: fn(&Theme) -> Appearance) -> Self {
-        self.style = style.into();
+    #[must_use]
+    pub fn style(mut self, style: impl Fn(&Theme) -> Style + 'a) -> Self
+    where
+        Theme::Class<'a>: From<StyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets the style class of the [`QRCode`].
+    #[cfg(feature = "advanced")]
+    #[must_use]
+    pub fn class(mut self, class: impl Into<Theme::Class<'a>>) -> Self {
+        self.class = class.into();
         self
     }
 }
 
-impl<'a, Message, Theme> Widget<Message, Theme, Renderer>
-    for QRCode<'a, Theme>
+impl<Message, Theme> Widget<Message, Theme, Renderer> for QRCode<'_, Theme>
+where
+    Theme: Catalog,
 {
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<State>()
@@ -76,8 +141,8 @@ impl<'a, Message, Theme> Widget<Message, Theme, Renderer>
         _renderer: &Renderer,
         _limits: &layout::Limits,
     ) -> layout::Node {
-        let side_length = (self.data.width + 2 * QUIET_ZONE) as f32
-            * f32::from(self.cell_size);
+        let side_length =
+            (self.data.width + 2 * QUIET_ZONE) as f32 * self.cell_size;
 
         layout::Node::new(Size::new(side_length, side_length))
     }
@@ -97,13 +162,13 @@ impl<'a, Message, Theme> Widget<Message, Theme, Renderer>
         let bounds = layout.bounds();
         let side_length = self.data.width + 2 * QUIET_ZONE;
 
-        let appearance = (self.style)(theme);
-        let mut last_appearance = state.last_appearance.borrow_mut();
+        let style = theme.style(&self.class);
+        let mut last_style = state.last_style.borrow_mut();
 
-        if Some(appearance) != *last_appearance {
+        if Some(style) != *last_style {
             self.data.cache.clear();
 
-            *last_appearance = Some(appearance);
+            *last_style = Some(style);
         }
 
         // Reuse cache if possible
@@ -115,7 +180,7 @@ impl<'a, Message, Theme> Widget<Message, Theme, Renderer>
             frame.fill_rectangle(
                 Point::ORIGIN,
                 Size::new(side_length as f32, side_length as f32),
-                appearance.background,
+                style.background,
             );
 
             // Avoid drawing on the quiet zone
@@ -134,7 +199,7 @@ impl<'a, Message, Theme> Widget<Message, Theme, Renderer>
                     frame.fill_rectangle(
                         Point::new(column as f32, row as f32),
                         Size::UNIT,
-                        appearance.cell,
+                        style.cell,
                     );
                 });
         });
@@ -142,7 +207,9 @@ impl<'a, Message, Theme> Widget<Message, Theme, Renderer>
         renderer.with_translation(
             bounds.position() - Point::ORIGIN,
             |renderer| {
-                renderer.draw(vec![geometry]);
+                use crate::graphics::geometry::Renderer as _;
+
+                renderer.draw_geometry(geometry);
             },
         );
     }
@@ -151,7 +218,7 @@ impl<'a, Message, Theme> Widget<Message, Theme, Renderer>
 impl<'a, Message, Theme> From<QRCode<'a, Theme>>
     for Element<'a, Message, Theme, Renderer>
 where
-    Theme: 'a,
+    Theme: Catalog + 'a,
 {
     fn from(qr_code: QRCode<'a, Theme>) -> Self {
         Self::new(qr_code)
@@ -165,7 +232,7 @@ where
 pub struct Data {
     contents: Vec<qrcode::Color>,
     width: usize,
-    cache: canvas::Cache,
+    cache: canvas::Cache<Renderer>,
 }
 
 impl Data {
@@ -323,44 +390,50 @@ impl From<qrcode::types::QrError> for Error {
 
 #[derive(Default)]
 struct State {
-    last_appearance: RefCell<Option<Appearance>>,
+    last_style: RefCell<Option<Style>>,
 }
 
 /// The appearance of a QR code.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Appearance {
+pub struct Style {
     /// The color of the QR code data cells
     pub cell: Color,
     /// The color of the QR code background
     pub background: Color,
 }
 
-/// The style of a [`QRCode`].
-pub type Style<Theme> = fn(&Theme) -> Appearance;
+/// The theme catalog of a [`QRCode`].
+pub trait Catalog {
+    /// The item class of the [`Catalog`].
+    type Class<'a>;
 
-/// The default style of a [`QRCode`].
-pub trait DefaultStyle {
-    /// Returns the default style of a [`QRCode`].
-    fn default_style() -> Style<Self>;
+    /// The default class produced by the [`Catalog`].
+    fn default<'a>() -> Self::Class<'a>;
+
+    /// The [`Style`] of a class with the given status.
+    fn style(&self, class: &Self::Class<'_>) -> Style;
 }
 
-impl DefaultStyle for Theme {
-    fn default_style() -> Style<Self> {
-        default
+/// A styling function for a [`QRCode`].
+pub type StyleFn<'a, Theme> = Box<dyn Fn(&Theme) -> Style + 'a>;
+
+impl Catalog for Theme {
+    type Class<'a> = StyleFn<'a, Self>;
+
+    fn default<'a>() -> Self::Class<'a> {
+        Box::new(default)
+    }
+
+    fn style(&self, class: &Self::Class<'_>) -> Style {
+        class(self)
     }
 }
 
-impl DefaultStyle for Appearance {
-    fn default_style() -> Style<Self> {
-        |appearance| *appearance
-    }
-}
-
 /// The default style of a [`QRCode`].
-pub fn default(theme: &Theme) -> Appearance {
+pub fn default(theme: &Theme) -> Style {
     let palette = theme.palette();
 
-    Appearance {
+    Style {
         cell: palette.text,
         background: palette.background,
     }

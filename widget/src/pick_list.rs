@@ -1,17 +1,79 @@
-//! Display a dropdown list of selectable values.
+//! Pick lists display a dropdown list of selectable options.
+//!
+//! # Example
+//! ```no_run
+//! # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+//! # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+//! #
+//! use iced::widget::pick_list;
+//!
+//! struct State {
+//!    favorite: Option<Fruit>,
+//! }
+//!
+//! #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//! enum Fruit {
+//!     Apple,
+//!     Orange,
+//!     Strawberry,
+//!     Tomato,
+//! }
+//!
+//! #[derive(Debug, Clone)]
+//! enum Message {
+//!     FruitSelected(Fruit),
+//! }
+//!
+//! fn view(state: &State) -> Element<'_, Message> {
+//!     let fruits = [
+//!         Fruit::Apple,
+//!         Fruit::Orange,
+//!         Fruit::Strawberry,
+//!         Fruit::Tomato,
+//!     ];
+//!
+//!     pick_list(
+//!         fruits,
+//!         state.favorite,
+//!         Message::FruitSelected,
+//!     )
+//!     .placeholder("Select your favorite fruit...")
+//!     .into()
+//! }
+//!
+//! fn update(state: &mut State, message: Message) {
+//!     match message {
+//!         Message::FruitSelected(fruit) => {
+//!             state.favorite = Some(fruit);
+//!         }
+//!     }
+//! }
+//!
+//! impl std::fmt::Display for Fruit {
+//!     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//!         f.write_str(match self {
+//!             Self::Apple => "Apple",
+//!             Self::Orange => "Orange",
+//!             Self::Strawberry => "Strawberry",
+//!             Self::Tomato => "Tomato",
+//!         })
+//!     }
+//! }
+//! ```
 use crate::core::alignment;
-use crate::core::event::{self, Event};
 use crate::core::keyboard;
 use crate::core::layout;
 use crate::core::mouse;
 use crate::core::overlay;
 use crate::core::renderer;
-use crate::core::text::{self, Paragraph as _, Text};
+use crate::core::text::paragraph;
+use crate::core::text::{self, Text};
 use crate::core::touch;
 use crate::core::widget::tree::{self, Tree};
+use crate::core::window;
 use crate::core::{
-    Background, Border, Clipboard, Color, Element, Layout, Length, Padding,
-    Pixels, Point, Rectangle, Shell, Size, Theme, Vector, Widget,
+    Background, Border, Clipboard, Color, Element, Event, Layout, Length,
+    Padding, Pixels, Point, Rectangle, Shell, Size, Theme, Vector, Widget,
 };
 use crate::overlay::menu::{self, Menu};
 
@@ -19,6 +81,67 @@ use std::borrow::Borrow;
 use std::f32;
 
 /// A widget for selecting a single value from a list of options.
+///
+/// # Example
+/// ```no_run
+/// # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+/// # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+/// #
+/// use iced::widget::pick_list;
+///
+/// struct State {
+///    favorite: Option<Fruit>,
+/// }
+///
+/// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// enum Fruit {
+///     Apple,
+///     Orange,
+///     Strawberry,
+///     Tomato,
+/// }
+///
+/// #[derive(Debug, Clone)]
+/// enum Message {
+///     FruitSelected(Fruit),
+/// }
+///
+/// fn view(state: &State) -> Element<'_, Message> {
+///     let fruits = [
+///         Fruit::Apple,
+///         Fruit::Orange,
+///         Fruit::Strawberry,
+///         Fruit::Tomato,
+///     ];
+///
+///     pick_list(
+///         fruits,
+///         state.favorite,
+///         Message::FruitSelected,
+///     )
+///     .placeholder("Select your favorite fruit...")
+///     .into()
+/// }
+///
+/// fn update(state: &mut State, message: Message) {
+///     match message {
+///         Message::FruitSelected(fruit) => {
+///             state.favorite = Some(fruit);
+///         }
+///     }
+/// }
+///
+/// impl std::fmt::Display for Fruit {
+///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         f.write_str(match self {
+///             Self::Apple => "Apple",
+///             Self::Orange => "Orange",
+///             Self::Strawberry => "Strawberry",
+///             Self::Tomato => "Tomato",
+///         })
+///     }
+/// }
+/// ```
 #[allow(missing_debug_implementations)]
 pub struct PickList<
     'a,
@@ -32,6 +155,7 @@ pub struct PickList<
     T: ToString + PartialEq + Clone,
     L: Borrow<[T]> + 'a,
     V: Borrow<T> + 'a,
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     on_select: Box<dyn Fn(T) -> Message + 'a>,
@@ -47,7 +171,9 @@ pub struct PickList<
     text_shaping: text::Shaping,
     font: Option<Renderer::Font>,
     handle: Handle<Renderer::Font>,
-    style: Style<Theme>,
+    class: <Theme as Catalog>::Class<'a>,
+    menu_class: <Theme as menu::Catalog>::Class<'a>,
+    last_status: Option<Status>,
 }
 
 impl<'a, T, L, V, Message, Theme, Renderer>
@@ -57,6 +183,7 @@ where
     L: Borrow<[T]> + 'a,
     V: Borrow<T> + 'a,
     Message: Clone,
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     /// Creates a new [`PickList`] with the given list of options, the current
@@ -65,10 +192,7 @@ where
         options: L,
         selected: Option<V>,
         on_select: impl Fn(T) -> Message + 'a,
-    ) -> Self
-    where
-        Theme: DefaultStyle,
-    {
+    ) -> Self {
         Self {
             on_select: Box::new(on_select),
             on_open: None,
@@ -80,10 +204,12 @@ where
             padding: crate::button::DEFAULT_PADDING,
             text_size: None,
             text_line_height: text::LineHeight::default(),
-            text_shaping: text::Shaping::Basic,
+            text_shaping: text::Shaping::default(),
             font: None,
             handle: Handle::default(),
-            style: Theme::default_style(),
+            class: <Theme as Catalog>::default(),
+            menu_class: <Theme as Catalog>::default_menu(),
+            last_status: None,
         }
     }
 
@@ -151,8 +277,47 @@ where
     }
 
     /// Sets the style of the [`PickList`].
-    pub fn style(mut self, style: impl Into<Style<Theme>>) -> Self {
-        self.style = style.into();
+    #[must_use]
+    pub fn style(mut self, style: impl Fn(&Theme, Status) -> Style + 'a) -> Self
+    where
+        <Theme as Catalog>::Class<'a>: From<StyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets the style of the [`Menu`].
+    #[must_use]
+    pub fn menu_style(
+        mut self,
+        style: impl Fn(&Theme) -> menu::Style + 'a,
+    ) -> Self
+    where
+        <Theme as menu::Catalog>::Class<'a>: From<menu::StyleFn<'a, Theme>>,
+    {
+        self.menu_class = (Box::new(style) as menu::StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets the style class of the [`PickList`].
+    #[cfg(feature = "advanced")]
+    #[must_use]
+    pub fn class(
+        mut self,
+        class: impl Into<<Theme as Catalog>::Class<'a>>,
+    ) -> Self {
+        self.class = class.into();
+        self
+    }
+
+    /// Sets the style class of the [`Menu`].
+    #[cfg(feature = "advanced")]
+    #[must_use]
+    pub fn menu_class(
+        mut self,
+        class: impl Into<<Theme as menu::Catalog>::Class<'a>>,
+    ) -> Self {
+        self.menu_class = class.into();
         self
     }
 }
@@ -164,6 +329,7 @@ where
     L: Borrow<[T]>,
     V: Borrow<T>,
     Message: Clone + 'a,
+    Theme: Catalog + 'a,
     Renderer: text::Renderer + 'a,
 {
     fn tag(&self) -> tree::Tag {
@@ -208,6 +374,7 @@ where
             horizontal_alignment: alignment::Horizontal::Left,
             vertical_alignment: alignment::Vertical::Center,
             shaping: self.text_shaping,
+            wrapping: text::Wrapping::default(),
         };
 
         for (option, paragraph) in options.iter().zip(state.options.iter_mut())
@@ -260,7 +427,7 @@ where
         layout::Node::new(size)
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
         event: Event,
@@ -270,13 +437,12 @@ where
         _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
+        let state = tree.state.downcast_mut::<State<Renderer::Paragraph>>();
+
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
-                let state =
-                    tree.state.downcast_mut::<State<Renderer::Paragraph>>();
-
                 if state.is_open {
                     // Event wasn't processed by overlay, so cursor was clicked either outside its
                     // bounds or on the drop-down, either way we close the overlay.
@@ -286,7 +452,7 @@ where
                         shell.publish(on_close.clone());
                     }
 
-                    event::Status::Captured
+                    shell.capture_event();
                 } else if cursor.is_over(layout.bounds()) {
                     let selected = self.selected.as_ref().map(Borrow::borrow);
 
@@ -301,17 +467,12 @@ where
                         shell.publish(on_open.clone());
                     }
 
-                    event::Status::Captured
-                } else {
-                    event::Status::Ignored
+                    shell.capture_event();
                 }
             }
             Event::Mouse(mouse::Event::WheelScrolled {
                 delta: mouse::ScrollDelta::Lines { y, .. },
             }) => {
-                let state =
-                    tree.state.downcast_mut::<State<Renderer::Paragraph>>();
-
                 if state.keyboard_modifiers.command()
                     && cursor.is_over(layout.bounds())
                     && !state.is_open
@@ -348,20 +509,34 @@ where
                         shell.publish((self.on_select)(next_option.clone()));
                     }
 
-                    event::Status::Captured
-                } else {
-                    event::Status::Ignored
+                    shell.capture_event();
                 }
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
-                let state =
-                    tree.state.downcast_mut::<State<Renderer::Paragraph>>();
-
                 state.keyboard_modifiers = modifiers;
-
-                event::Status::Ignored
             }
-            _ => event::Status::Ignored,
+            _ => {}
+        };
+
+        let status = {
+            let is_hovered = cursor.is_over(layout.bounds());
+
+            if state.is_open {
+                Status::Opened { is_hovered }
+            } else if is_hovered {
+                Status::Hovered
+            } else {
+                Status::Active
+            }
+        };
+
+        if let Event::Window(window::Event::RedrawRequested(_now)) = event {
+            self.last_status = Some(status);
+        } else if self
+            .last_status
+            .is_some_and(|last_status| last_status != status)
+        {
+            shell.request_redraw();
         }
     }
 
@@ -390,7 +565,7 @@ where
         theme: &Theme,
         _style: &renderer::Style,
         layout: Layout<'_>,
-        cursor: mouse::Cursor,
+        _cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
         let font = self.font.unwrap_or_else(|| renderer.default_font());
@@ -398,26 +573,20 @@ where
         let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
 
         let bounds = layout.bounds();
-        let is_mouse_over = cursor.is_over(bounds);
-        let is_selected = selected.is_some();
 
-        let status = if state.is_open {
-            Status::Opened
-        } else if is_mouse_over {
-            Status::Hovered
-        } else {
-            Status::Active
-        };
-
-        let appearance = (self.style.field)(theme, status);
+        let style = Catalog::style(
+            theme,
+            &self.class,
+            self.last_status.unwrap_or(Status::Active),
+        );
 
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
-                border: appearance.border,
+                border: style.border,
                 ..renderer::Quad::default()
             },
-            appearance.background,
+            style.background,
         );
 
         let handle = match &self.handle {
@@ -462,7 +631,7 @@ where
 
             renderer.fill_text(
                 Text {
-                    content: &code_point.to_string(),
+                    content: code_point.to_string(),
                     size,
                     line_height,
                     font,
@@ -473,19 +642,20 @@ where
                     horizontal_alignment: alignment::Horizontal::Right,
                     vertical_alignment: alignment::Vertical::Center,
                     shaping,
+                    wrapping: text::Wrapping::default(),
                 },
                 Point::new(
                     bounds.x + bounds.width - self.padding.right,
                     bounds.center_y(),
                 ),
-                appearance.handle_color,
+                style.handle_color,
                 *viewport,
             );
         }
 
         let label = selected.map(ToString::to_string);
 
-        if let Some(label) = label.as_deref().or(self.placeholder.as_deref()) {
+        if let Some(label) = label.or_else(|| self.placeholder.clone()) {
             let text_size =
                 self.text_size.unwrap_or_else(|| renderer.default_size());
 
@@ -502,12 +672,13 @@ where
                     horizontal_alignment: alignment::Horizontal::Left,
                     vertical_alignment: alignment::Vertical::Center,
                     shaping: self.text_shaping,
+                    wrapping: text::Wrapping::default(),
                 },
                 Point::new(bounds.x + self.padding.left, bounds.center_y()),
-                if is_selected {
-                    appearance.text_color
+                if selected.is_some() {
+                    style.text_color
                 } else {
-                    appearance.placeholder_color
+                    style.placeholder_color
                 },
                 *viewport,
             );
@@ -529,7 +700,7 @@ where
 
             let on_select = &self.on_select;
 
-            let mut menu = Menu::with_style(
+            let mut menu = Menu::new(
                 &mut state.menu,
                 self.options.borrow(),
                 &mut state.hovered_option,
@@ -539,7 +710,7 @@ where
                     (on_select)(option)
                 },
                 None,
-                self.style.menu,
+                &self.menu_class,
             )
             .width(bounds.width)
             .padding(self.padding)
@@ -565,7 +736,7 @@ where
     L: Borrow<[T]> + 'a,
     V: Borrow<T> + 'a,
     Message: Clone + 'a,
-    Theme: 'a,
+    Theme: Catalog + 'a,
     Renderer: text::Renderer + 'a,
 {
     fn from(
@@ -581,8 +752,8 @@ struct State<P: text::Paragraph> {
     keyboard_modifiers: keyboard::Modifiers,
     is_open: bool,
     hovered_option: Option<usize>,
-    options: Vec<P>,
-    placeholder: P,
+    options: Vec<paragraph::Plain<P>>,
+    placeholder: paragraph::Plain<P>,
 }
 
 impl<P: text::Paragraph> State<P> {
@@ -594,7 +765,7 @@ impl<P: text::Paragraph> State<P> {
             is_open: bool::default(),
             hovered_option: Option::default(),
             options: Vec::new(),
-            placeholder: P::default(),
+            placeholder: paragraph::Plain::default(),
         }
     }
 }
@@ -657,12 +828,15 @@ pub enum Status {
     /// The [`PickList`] is being hovered.
     Hovered,
     /// The [`PickList`] is open.
-    Opened,
+    Opened {
+        /// Whether the [`PickList`] is hovered, while open.
+        is_hovered: bool,
+    },
 }
 
 /// The appearance of a pick list.
-#[derive(Debug, Clone, Copy)]
-pub struct Appearance {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Style {
     /// The text [`Color`] of the pick list.
     pub text_color: Color,
     /// The placeholder [`Color`] of the pick list.
@@ -675,49 +849,49 @@ pub struct Appearance {
     pub border: Border,
 }
 
-/// The styles of the different parts of a [`PickList`].
-#[derive(Debug, PartialEq, Eq)]
-pub struct Style<Theme> {
-    /// The style of the [`PickList`] itself.
-    pub field: fn(&Theme, Status) -> Appearance,
+/// The theme catalog of a [`PickList`].
+pub trait Catalog: menu::Catalog {
+    /// The item class of the [`Catalog`].
+    type Class<'a>;
 
-    /// The style of the [`Menu`] of the pick list.
-    pub menu: menu::Style<Theme>,
-}
+    /// The default class produced by the [`Catalog`].
+    fn default<'a>() -> <Self as Catalog>::Class<'a>;
 
-impl Style<Theme> {
-    /// The default style of a [`PickList`] with the built-in [`Theme`].
-    pub const DEFAULT: Self = Self {
-        field: default,
-        menu: menu::Style::<Theme>::DEFAULT,
-    };
-}
-
-impl<Theme> Clone for Style<Theme> {
-    fn clone(&self) -> Self {
-        *self
+    /// The default class for the menu of the [`PickList`].
+    fn default_menu<'a>() -> <Self as menu::Catalog>::Class<'a> {
+        <Self as menu::Catalog>::default()
     }
+
+    /// The [`Style`] of a class with the given status.
+    fn style(
+        &self,
+        class: &<Self as Catalog>::Class<'_>,
+        status: Status,
+    ) -> Style;
 }
 
-impl<Theme> Copy for Style<Theme> {}
+/// A styling function for a [`PickList`].
+///
+/// This is just a boxed closure: `Fn(&Theme, Status) -> Style`.
+pub type StyleFn<'a, Theme> = Box<dyn Fn(&Theme, Status) -> Style + 'a>;
 
-/// The default style of a [`PickList`].
-pub trait DefaultStyle: Sized {
-    /// Returns the default style of a [`PickList`].
-    fn default_style() -> Style<Self>;
-}
+impl Catalog for Theme {
+    type Class<'a> = StyleFn<'a, Self>;
 
-impl DefaultStyle for Theme {
-    fn default_style() -> Style<Self> {
-        Style::<Self>::DEFAULT
+    fn default<'a>() -> StyleFn<'a, Self> {
+        Box::new(default)
+    }
+
+    fn style(&self, class: &StyleFn<'_, Self>, status: Status) -> Style {
+        class(self, status)
     }
 }
 
 /// The default style of the field of a [`PickList`].
-pub fn default(theme: &Theme, status: Status) -> Appearance {
+pub fn default(theme: &Theme, status: Status) -> Style {
     let palette = theme.extended_palette();
 
-    let active = Appearance {
+    let active = Style {
         text_color: palette.background.weak.text,
         background: palette.background.weak.color.into(),
         placeholder_color: palette.background.strong.color,
@@ -731,7 +905,7 @@ pub fn default(theme: &Theme, status: Status) -> Appearance {
 
     match status {
         Status::Active => active,
-        Status::Hovered | Status::Opened => Appearance {
+        Status::Hovered | Status::Opened { .. } => Style {
             border: Border {
                 color: palette.primary.strong.color,
                 ..active.border

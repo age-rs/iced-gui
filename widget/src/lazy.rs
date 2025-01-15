@@ -4,12 +4,12 @@ pub(crate) mod helpers;
 pub mod component;
 pub mod responsive;
 
+#[allow(deprecated)]
 pub use component::Component;
 pub use responsive::Responsive;
 
 mod cache;
 
-use crate::core::event::{self, Event};
 use crate::core::layout::{self, Layout};
 use crate::core::mouse;
 use crate::core::overlay;
@@ -18,16 +18,18 @@ use crate::core::widget::tree::{self, Tree};
 use crate::core::widget::{self, Widget};
 use crate::core::Element;
 use crate::core::{
-    self, Clipboard, Hasher, Length, Point, Rectangle, Shell, Size, Vector,
+    self, Clipboard, Event, Length, Point, Rectangle, Shell, Size, Vector,
 };
 use crate::runtime::overlay::Nested;
 
 use ouroboros::self_referencing;
+use rustc_hash::FxHasher;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher as H};
 use std::rc::Rc;
 
 /// A widget that only rebuilds its contents when necessary.
+#[cfg(feature = "lazy")]
 #[allow(missing_debug_implementations)]
 pub struct Lazy<'a, Message, Theme, Renderer, Dependency, View> {
     dependency: Dependency,
@@ -106,9 +108,12 @@ where
     }
 
     fn state(&self) -> tree::State {
-        let mut hasher = Hasher::default();
-        self.dependency.hash(&mut hasher);
-        let hash = hasher.finish();
+        let hash = {
+            let mut hasher = FxHasher::default();
+            self.dependency.hash(&mut hasher);
+
+            hasher.finish()
+        };
 
         let element =
             Rc::new(RefCell::new(Some((self.view)(&self.dependency).into())));
@@ -127,9 +132,12 @@ where
             .state
             .downcast_mut::<Internal<Message, Theme, Renderer>>();
 
-        let mut hasher = Hasher::default();
-        self.dependency.hash(&mut hasher);
-        let new_hash = hasher.finish();
+        let new_hash = {
+            let mut hasher = FxHasher::default();
+            self.dependency.hash(&mut hasher);
+
+            hasher.finish()
+        };
 
         if current.hash != new_hash {
             current.hash = new_hash;
@@ -175,7 +183,7 @@ where
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
-        operation: &mut dyn widget::Operation<Message>,
+        operation: &mut dyn widget::Operation,
     ) {
         self.with_element(|element| {
             element.as_widget().operate(
@@ -187,7 +195,7 @@ where
         });
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
         event: Event,
@@ -197,9 +205,9 @@ where
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         self.with_element_mut(|element| {
-            element.as_widget_mut().on_event(
+            element.as_widget_mut().update(
                 &mut tree.children[0],
                 event,
                 layout,
@@ -208,8 +216,8 @@ where
                 clipboard,
                 shell,
                 viewport,
-            )
-        })
+            );
+        });
     }
 
     fn mouse_interaction(
@@ -260,30 +268,41 @@ where
         layout: Layout<'_>,
         renderer: &Renderer,
         translation: Vector,
-    ) -> Option<overlay::Element<'_, Message, Theme, Renderer>> {
-        let overlay = Overlay(Some(
-            InnerBuilder {
-                cell: self.element.borrow().as_ref().unwrap().clone(),
-                element: self
-                    .element
-                    .borrow()
-                    .as_ref()
-                    .unwrap()
-                    .borrow_mut()
-                    .take()
-                    .unwrap(),
-                tree: &mut tree.children[0],
-                overlay_builder: |element, tree| {
-                    element
-                        .as_widget_mut()
-                        .overlay(tree, layout, renderer, translation)
-                        .map(|overlay| RefCell::new(Nested::new(overlay)))
-                },
-            }
-            .build(),
-        ));
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        let overlay = InnerBuilder {
+            cell: self.element.borrow().as_ref().unwrap().clone(),
+            element: self
+                .element
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .take()
+                .unwrap(),
+            tree: &mut tree.children[0],
+            overlay_builder: |element, tree| {
+                element
+                    .as_widget_mut()
+                    .overlay(tree, layout, renderer, translation)
+                    .map(|overlay| RefCell::new(Nested::new(overlay)))
+            },
+        }
+        .build();
 
-        Some(overlay::Element::new(Box::new(overlay)))
+        #[allow(clippy::redundant_closure_for_method_calls)]
+        if overlay.with_overlay(|overlay| overlay.is_some()) {
+            Some(overlay::Element::new(Box::new(Overlay(Some(overlay)))))
+        } else {
+            let heads = overlay.into_heads();
+
+            // - You may not like it, but this is what peak performance looks like
+            // - TODO: Get rid of ouroboros, for good
+            // - What?!
+            *self.element.borrow().as_ref().unwrap().borrow_mut() =
+                Some(heads.element);
+
+            None
+        }
     }
 }
 
@@ -302,16 +321,14 @@ struct Overlay<'a, Message, Theme, Renderer>(
     Option<Inner<'a, Message, Theme, Renderer>>,
 );
 
-impl<'a, Message, Theme, Renderer> Drop
-    for Overlay<'a, Message, Theme, Renderer>
-{
+impl<Message, Theme, Renderer> Drop for Overlay<'_, Message, Theme, Renderer> {
     fn drop(&mut self) {
         let heads = self.0.take().unwrap().into_heads();
         (*heads.cell.borrow_mut()) = Some(heads.element);
     }
 }
 
-impl<'a, Message, Theme, Renderer> Overlay<'a, Message, Theme, Renderer> {
+impl<Message, Theme, Renderer> Overlay<'_, Message, Theme, Renderer> {
     fn with_overlay_maybe<T>(
         &self,
         f: impl FnOnce(&mut Nested<'_, Message, Theme, Renderer>) -> T,
@@ -331,8 +348,8 @@ impl<'a, Message, Theme, Renderer> Overlay<'a, Message, Theme, Renderer> {
     }
 }
 
-impl<'a, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
-    for Overlay<'a, Message, Theme, Renderer>
+impl<Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
+    for Overlay<'_, Message, Theme, Renderer>
 where
     Renderer: core::Renderer,
 {
@@ -367,7 +384,7 @@ where
         .unwrap_or_default()
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         event: Event,
         layout: Layout<'_>,
@@ -375,11 +392,10 @@ where
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
-    ) -> event::Status {
-        self.with_overlay_mut_maybe(|overlay| {
-            overlay.on_event(event, layout, cursor, renderer, clipboard, shell)
-        })
-        .unwrap_or(event::Status::Ignored)
+    ) {
+        let _ = self.with_overlay_mut_maybe(|overlay| {
+            overlay.update(event, layout, cursor, renderer, clipboard, shell);
+        });
     }
 
     fn is_over(

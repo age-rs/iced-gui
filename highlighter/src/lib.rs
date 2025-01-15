@@ -1,21 +1,25 @@
+//! A syntax highlighter for iced.
 use iced_core as core;
 
+use crate::core::font::{self, Font};
 use crate::core::text::highlighter::{self, Format};
-use crate::core::{Color, Font};
+use crate::core::Color;
 
-use once_cell::sync::Lazy;
 use std::ops::Range;
+use std::sync::LazyLock;
 use syntect::highlighting;
 use syntect::parsing;
 
-static SYNTAXES: Lazy<parsing::SyntaxSet> =
-    Lazy::new(parsing::SyntaxSet::load_defaults_nonewlines);
+static SYNTAXES: LazyLock<parsing::SyntaxSet> =
+    LazyLock::new(parsing::SyntaxSet::load_defaults_nonewlines);
 
-static THEMES: Lazy<highlighting::ThemeSet> =
-    Lazy::new(highlighting::ThemeSet::load_defaults);
+static THEMES: LazyLock<highlighting::ThemeSet> =
+    LazyLock::new(highlighting::ThemeSet::load_defaults);
 
 const LINES_PER_SNAPSHOT: usize = 50;
 
+/// A syntax highlighter.
+#[derive(Debug)]
 pub struct Highlighter {
     syntax: &'static parsing::SyntaxReference,
     highlighter: highlighting::Highlighter<'static>,
@@ -32,7 +36,7 @@ impl highlighter::Highlighter for Highlighter {
 
     fn new(settings: &Self::Settings) -> Self {
         let syntax = SYNTAXES
-            .find_syntax_by_token(&settings.extension)
+            .find_syntax_by_token(&settings.token)
             .unwrap_or_else(|| SYNTAXES.find_syntax_plain_text());
 
         let highlighter = highlighting::Highlighter::new(
@@ -52,7 +56,7 @@ impl highlighter::Highlighter for Highlighter {
 
     fn update(&mut self, new_settings: &Self::Settings) {
         self.syntax = SYNTAXES
-            .find_syntax_by_token(&new_settings.extension)
+            .find_syntax_by_token(&new_settings.token)
             .unwrap_or_else(|| SYNTAXES.find_syntax_plain_text());
 
         self.highlighter = highlighting::Highlighter::new(
@@ -131,25 +135,68 @@ impl highlighter::Highlighter for Highlighter {
     }
 }
 
+/// The settings of a [`Highlighter`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
+    /// The [`Theme`] of the [`Highlighter`].
+    ///
+    /// It dictates the color scheme that will be used for highlighting.
     pub theme: Theme,
-    pub extension: String,
+    /// The extension of the file or the name of the language to highlight.
+    ///
+    /// The [`Highlighter`] will use the token to automatically determine
+    /// the grammar to use for highlighting.
+    pub token: String,
 }
 
+/// A highlight produced by a [`Highlighter`].
+#[derive(Debug)]
 pub struct Highlight(highlighting::StyleModifier);
 
 impl Highlight {
+    /// Returns the color of this [`Highlight`].
+    ///
+    /// If `None`, the original text color should be unchanged.
     pub fn color(&self) -> Option<Color> {
         self.0.foreground.map(|color| {
             Color::from_rgba8(color.r, color.g, color.b, color.a as f32 / 255.0)
         })
     }
 
+    /// Returns the font of this [`Highlight`].
+    ///
+    /// If `None`, the original font should be unchanged.
     pub fn font(&self) -> Option<Font> {
-        None
+        self.0.font_style.and_then(|style| {
+            let bold = style.contains(highlighting::FontStyle::BOLD);
+            let italic = style.contains(highlighting::FontStyle::ITALIC);
+
+            if bold || italic {
+                Some(Font {
+                    weight: if bold {
+                        font::Weight::Bold
+                    } else {
+                        font::Weight::Normal
+                    },
+                    style: if italic {
+                        font::Style::Italic
+                    } else {
+                        font::Style::Normal
+                    },
+                    ..Font::MONOSPACE
+                })
+            } else {
+                None
+            }
+        })
     }
 
+    /// Returns the [`Format`] of the [`Highlight`].
+    ///
+    /// It contains both the [`color`] and the [`font`].
+    ///
+    /// [`color`]: Self::color
+    /// [`font`]: Self::font
     pub fn to_format(&self) -> Format<Font> {
         Format {
             color: self.color(),
@@ -158,6 +205,8 @@ impl Highlight {
     }
 }
 
+/// A highlighting theme.
+#[allow(missing_docs)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Theme {
     SolarizedDark,
@@ -168,6 +217,7 @@ pub enum Theme {
 }
 
 impl Theme {
+    /// A static slice containing all the available themes.
     pub const ALL: &'static [Self] = &[
         Self::SolarizedDark,
         Self::Base16Mocha,
@@ -176,6 +226,7 @@ impl Theme {
         Self::InspiredGitHub,
     ];
 
+    /// Returns `true` if the [`Theme`] is dark, and false otherwise.
     pub fn is_dark(self) -> bool {
         match self {
             Self::SolarizedDark
@@ -209,7 +260,7 @@ impl std::fmt::Display for Theme {
     }
 }
 
-pub struct ScopeRangeIterator {
+struct ScopeRangeIterator {
     ops: Vec<(usize, parsing::ScopeStackOp)>,
     line_length: usize,
     index: usize,

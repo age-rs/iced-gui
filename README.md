@@ -15,11 +15,11 @@
 A cross-platform GUI library for Rust focused on simplicity and type-safety.
 Inspired by [Elm].
 
-<a href="https://iced.rs/examples/todos.mp4">
-  <img src="https://iced.rs/examples/todos.gif" width="275px">
+<a href="https://github.com/squidowl/halloy">
+  <img src="https://iced.rs/showcase/halloy.gif" width="460px">
 </a>
-<a href="https://iced.rs/examples/tour.mp4">
-  <img src="https://iced.rs/examples/tour.gif" width="273px">
+<a href="https://github.com/hecrj/icebreaker">
+  <img src="https://iced.rs/showcase/icebreaker.gif" width="360px">
 </a>
 
 </div>
@@ -34,50 +34,28 @@ Inspired by [Elm].
 * Custom widget support (create your own!)
 * [Debug overlay with performance metrics]
 * First-class support for async actions (use futures!)
-* [Modular ecosystem] split into reusable parts:
+* Modular ecosystem split into reusable parts:
   * A [renderer-agnostic native runtime] enabling integration with existing systems
-  * Two [built-in renderers] leveraging [`wgpu`] and [`tiny-skia`]
+  * Two built-in renderers leveraging [`wgpu`] and [`tiny-skia`]
     * [`iced_wgpu`] supporting Vulkan, Metal and DX12
     * [`iced_tiny_skia`] offering a software alternative as a fallback
   * A [windowing shell]
-  * A [web runtime] leveraging the DOM
 
-__Iced is currently experimental software.__ [Take a look at the roadmap],
-[check out the issues], and [feel free to contribute!]
+__Iced is currently experimental software.__ [Take a look at the roadmap] and
+[check out the issues].
 
 [Cross-platform support]: https://raw.githubusercontent.com/iced-rs/iced/master/docs/images/todos_desktop.jpg
 [text inputs]: https://iced.rs/examples/text_input.mp4
 [scrollables]: https://iced.rs/examples/scrollable.mp4
 [Debug overlay with performance metrics]: https://iced.rs/examples/debug.mp4
-[Modular ecosystem]: ECOSYSTEM.md
 [renderer-agnostic native runtime]: runtime/
 [`wgpu`]: https://github.com/gfx-rs/wgpu
 [`tiny-skia`]: https://github.com/RazrFalcon/tiny-skia
 [`iced_wgpu`]: wgpu/
 [`iced_tiny_skia`]: tiny_skia/
-[built-in renderers]: ECOSYSTEM.md#Renderers
 [windowing shell]: winit/
-[`dodrio`]: https://github.com/fitzgen/dodrio
-[web runtime]: https://github.com/iced-rs/iced_web
 [Take a look at the roadmap]: ROADMAP.md
 [check out the issues]: https://github.com/iced-rs/iced/issues
-[feel free to contribute!]: #contributing--feedback
-
-## Installation
-
-Add `iced` as a dependency in your `Cargo.toml`:
-
-```toml
-iced = "0.12"
-```
-
-If your project is using a Rust edition older than 2021, then you will need to
-set `resolver = "2"` in the `[package]` section as well.
-
-__Iced moves fast and the `master` branch can contain breaking changes!__ If
-you want to learn about a specific release, check out [the release list].
-
-[the release list]: https://github.com/iced-rs/iced/releases
 
 ## Overview
 
@@ -98,8 +76,8 @@ that can be incremented and decremented using two buttons.
 We start by modelling the __state__ of our application:
 
 ```rust
+#[derive(Default)]
 struct Counter {
-    // The counter value
     value: i32,
 }
 ```
@@ -110,8 +88,8 @@ the button presses. These interactions are our __messages__:
 ```rust
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
-    IncrementPressed,
-    DecrementPressed,
+    Increment,
+    Decrement,
 }
 ```
 
@@ -126,15 +104,15 @@ impl Counter {
         // We use a column: a simple vertical layout
         column![
             // The increment button. We tell it to produce an
-            // `IncrementPressed` message when pressed
-            button("+").on_press(Message::IncrementPressed),
+            // `Increment` message when pressed
+            button("+").on_press(Message::Increment),
 
             // We show the value of the counter here
             text(self.value).size(50),
 
             // The decrement button. We tell it to produce a
-            // `DecrementPressed` message when pressed
-            button("-").on_press(Message::DecrementPressed),
+            // `Decrement` message when pressed
+            button("-").on_press(Message::Decrement),
         ]
     }
 }
@@ -149,10 +127,10 @@ impl Counter {
 
     pub fn update(&mut self, message: Message) {
         match message {
-            Message::IncrementPressed => {
+            Message::Increment => {
                 self.value += 1;
             }
-            Message::DecrementPressed => {
+            Message::Decrement => {
                 self.value -= 1;
             }
         }
@@ -160,20 +138,27 @@ impl Counter {
 }
 ```
 
-And that's everything! We just wrote a whole user interface. Iced is now able
-to:
+And that's everything! We just wrote a whole user interface. Let's run it:
+
+```rust
+fn main() -> iced::Result {
+    iced::run("A cool counter", Counter::update, Counter::view)
+}
+```
+
+Iced will automatically:
 
   1. Take the result of our __view logic__ and layout its widgets.
   1. Process events from our system and produce __messages__ for our
      __update logic__.
   1. Draw the resulting user interface.
 
-Browse the [documentation] and the [examples] to learn more!
+Read the [book], the [documentation], and the [examples] to learn more!
 
 ## Implementation details
 
 Iced was originally born as an attempt at bringing the simplicity of [Elm] and
-[The Elm Architecture] into [Coffee], a 2D game engine I am working on.
+[The Elm Architecture] into [Coffee], a 2D game library I am working on.
 
 The core of the library was implemented during May 2019 in [this pull request].
 [The first alpha version] was eventually released as
@@ -181,25 +166,17 @@ The core of the library was implemented during May 2019 in [this pull request].
 implemented the current [tour example] on top of [`ggez`], a game library.
 
 Since then, the focus has shifted towards providing a batteries-included,
-end-user-oriented GUI library, while keeping [the ecosystem] modular:
-
-<p align="center">
-  <a href="ECOSYSTEM.md">
-    <img alt="The Iced Ecosystem" src="docs/graphs/ecosystem.png" width="80%">
-  </a>
-</p>
+end-user-oriented GUI library, while keeping the ecosystem modular.
 
 [this pull request]: https://github.com/hecrj/coffee/pull/35
 [The first alpha version]: https://github.com/iced-rs/iced/tree/0.1.0-alpha
 [a renderer-agnostic GUI library]: https://www.reddit.com/r/rust/comments/czzjnv/iced_a_rendereragnostic_gui_library_focused_on/
 [tour example]: examples/README.md#tour
 [`ggez`]: https://github.com/ggez/ggez
-[the ecosystem]: ECOSYSTEM.md
 
 ## Contributing / Feedback
 
-Contributions are greatly appreciated! If you want to contribute, please
-read our [contributing guidelines] for more details.
+If you want to contribute, please read our [contributing guidelines] for more details.
 
 Feedback is also welcome! You can create a new topic in [our Discourse forum] or
 come chat to [our Discord server].
@@ -208,8 +185,9 @@ come chat to [our Discord server].
 
 The development of Iced is sponsored by the [Cryptowatch] team at [Kraken.com]
 
+[book]: https://book.iced.rs/
 [documentation]: https://docs.rs/iced/
-[examples]: https://github.com/iced-rs/iced/tree/master/examples
+[examples]: https://github.com/iced-rs/iced/tree/master/examples#examples
 [Coffee]: https://github.com/hecrj/coffee
 [Elm]: https://elm-lang.org/
 [The Elm Architecture]: https://guide.elm-lang.org/architecture/

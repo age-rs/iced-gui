@@ -1,20 +1,17 @@
 use std::{f32::consts::PI, time::Instant};
 
-use iced::executor;
 use iced::mouse;
 use iced::widget::canvas::{
     self, stroke, Cache, Canvas, Geometry, Path, Stroke,
 };
-use iced::{
-    Application, Command, Element, Length, Point, Rectangle, Renderer,
-    Settings, Subscription, Theme,
-};
+use iced::{Element, Fill, Point, Rectangle, Renderer, Subscription, Theme};
 
 pub fn main() -> iced::Result {
-    Arc::run(Settings {
-        antialiasing: true,
-        ..Settings::default()
-    })
+    iced::application("Arc - Iced", Arc::update, Arc::view)
+        .subscription(Arc::subscription)
+        .theme(|_| Theme::Dark)
+        .antialiasing(true)
+        .run()
 }
 
 struct Arc {
@@ -27,46 +24,27 @@ enum Message {
     Tick,
 }
 
-impl Application for Arc {
-    type Executor = executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = ();
-
-    fn new(_flags: ()) -> (Self, Command<Message>) {
-        (
-            Arc {
-                start: Instant::now(),
-                cache: Cache::default(),
-            },
-            Command::none(),
-        )
-    }
-
-    fn title(&self) -> String {
-        String::from("Arc - Iced")
-    }
-
-    fn update(&mut self, _: Message) -> Command<Message> {
+impl Arc {
+    fn update(&mut self, _: Message) {
         self.cache.clear();
-
-        Command::none()
     }
 
     fn view(&self) -> Element<Message> {
-        Canvas::new(self)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-    }
-
-    fn theme(&self) -> Theme {
-        Theme::Dark
+        Canvas::new(self).width(Fill).height(Fill).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
         iced::time::every(std::time::Duration::from_millis(10))
             .map(|_| Message::Tick)
+    }
+}
+
+impl Default for Arc {
+    fn default() -> Self {
+        Arc {
+            start: Instant::now(),
+            cache: Cache::default(),
+        }
     }
 }
 

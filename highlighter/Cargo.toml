@@ -10,8 +10,10 @@ homepage.workspace = true
 categories.workspace = true
 keywords.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 iced_core.workspace = true
 
-once_cell.workspace = true
 syntect.workspace = true

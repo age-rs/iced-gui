@@ -1,7 +1,8 @@
-use crate::canvas::event::{self, Event};
 use crate::canvas::mouse;
+use crate::canvas::{Event, Geometry};
 use crate::core::Rectangle;
 use crate::graphics::geometry;
+use crate::Action;
 
 /// The state and logic of a [`Canvas`].
 ///
@@ -21,8 +22,9 @@ where
     /// When a [`Program`] is used in a [`Canvas`], the runtime will call this
     /// method for each [`Event`].
     ///
-    /// This method can optionally return a `Message` to notify an application
-    /// of any meaningful interactions.
+    /// This method can optionally return an [`Action`] to either notify an
+    /// application of any meaningful interactions, capture the event, or
+    /// request a redraw.
     ///
     /// By default, this method does and returns nothing.
     ///
@@ -33,8 +35,8 @@ where
         _event: Event,
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
-    ) -> (event::Status, Option<Message>) {
-        (event::Status::Ignored, None)
+    ) -> Option<Action<Message>> {
+        None
     }
 
     /// Draws the state of the [`Program`], producing a bunch of [`Geometry`].
@@ -52,7 +54,7 @@ where
         theme: &Theme,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> Vec<Renderer::Geometry>;
+    ) -> Vec<Geometry<Renderer>>;
 
     /// Returns the current mouse interaction of the [`Program`].
     ///
@@ -83,7 +85,7 @@ where
         event: Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> (event::Status, Option<Message>) {
+    ) -> Option<Action<Message>> {
         T::update(self, state, event, bounds, cursor)
     }
 
@@ -94,7 +96,7 @@ where
         theme: &Theme,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> Vec<Renderer::Geometry> {
+    ) -> Vec<Geometry<Renderer>> {
         T::draw(self, state, renderer, theme, bounds, cursor)
     }
 

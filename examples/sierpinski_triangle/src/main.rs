@@ -1,25 +1,22 @@
-use std::fmt::Debug;
-
-use iced::executor;
 use iced::mouse;
-use iced::widget::canvas::event::{self, Event};
-use iced::widget::canvas::{self, Canvas};
+use iced::widget::canvas::{self, Canvas, Event, Geometry};
 use iced::widget::{column, row, slider, text};
-use iced::{
-    Application, Color, Command, Length, Point, Rectangle, Renderer, Settings,
-    Size, Theme,
-};
+use iced::{Center, Color, Fill, Point, Rectangle, Renderer, Size, Theme};
 
 use rand::Rng;
+use std::fmt::Debug;
 
 fn main() -> iced::Result {
-    SierpinskiEmulator::run(Settings {
-        antialiasing: true,
-        ..Settings::default()
-    })
+    iced::application(
+        "Sierpinski Triangle - Iced",
+        SierpinskiEmulator::update,
+        SierpinskiEmulator::view,
+    )
+    .antialiasing(true)
+    .run()
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct SierpinskiEmulator {
     graph: SierpinskiGraph,
 }
@@ -31,27 +28,8 @@ pub enum Message {
     PointRemoved,
 }
 
-impl Application for SierpinskiEmulator {
-    type Executor = executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = ();
-
-    fn new(_flags: Self::Flags) -> (Self, iced::Command<Self::Message>) {
-        let emulator = SierpinskiEmulator {
-            graph: SierpinskiGraph::new(),
-        };
-        (emulator, Command::none())
-    }
-
-    fn title(&self) -> String {
-        "Sierpinski Triangle Emulator".to_string()
-    }
-
-    fn update(
-        &mut self,
-        message: Self::Message,
-    ) -> iced::Command<Self::Message> {
+impl SierpinskiEmulator {
+    fn update(&mut self, message: Message) {
         match message {
             Message::IterationSet(cur_iter) => {
                 self.graph.iteration = cur_iter;
@@ -67,23 +45,19 @@ impl Application for SierpinskiEmulator {
         }
 
         self.graph.redraw();
-
-        Command::none()
     }
 
-    fn view(&self) -> iced::Element<'_, Self::Message> {
+    fn view(&self) -> iced::Element<'_, Message> {
         column![
-            Canvas::new(&self.graph)
-                .width(Length::Fill)
-                .height(Length::Fill),
+            Canvas::new(&self.graph).width(Fill).height(Fill),
             row![
-                text(format!("Iteration: {:?}", self.graph.iteration)),
+                text!("Iteration: {:?}", self.graph.iteration),
                 slider(0..=10000, self.graph.iteration, Message::IterationSet)
             ]
             .padding(10)
             .spacing(20),
         ]
-        .align_items(iced::Alignment::Center)
+        .align_x(Center)
         .into()
     }
 }
@@ -105,26 +79,22 @@ impl canvas::Program<Message> for SierpinskiGraph {
         event: Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> (event::Status, Option<Message>) {
-        let Some(cursor_position) = cursor.position_in(bounds) else {
-            return (event::Status::Ignored, None);
-        };
+    ) -> Option<canvas::Action<Message>> {
+        let cursor_position = cursor.position_in(bounds)?;
 
         match event {
-            Event::Mouse(mouse_event) => {
-                let message = match mouse_event {
-                    iced::mouse::Event::ButtonPressed(
-                        iced::mouse::Button::Left,
-                    ) => Some(Message::PointAdded(cursor_position)),
-                    iced::mouse::Event::ButtonPressed(
-                        iced::mouse::Button::Right,
-                    ) => Some(Message::PointRemoved),
-                    _ => None,
-                };
-                (event::Status::Captured, message)
-            }
-            _ => (event::Status::Ignored, None),
+            Event::Mouse(mouse::Event::ButtonPressed(button)) => match button {
+                mouse::Button::Left => Some(canvas::Action::publish(
+                    Message::PointAdded(cursor_position),
+                )),
+                mouse::Button::Right => {
+                    Some(canvas::Action::publish(Message::PointRemoved))
+                }
+                _ => None,
+            },
+            _ => None,
         }
+        .map(canvas::Action::and_capture)
     }
 
     fn draw(
@@ -134,7 +104,7 @@ impl canvas::Program<Message> for SierpinskiGraph {
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
+    ) -> Vec<Geometry> {
         let geom = self.cache.draw(renderer, bounds.size(), |frame| {
             frame.stroke(
                 &canvas::Path::rectangle(Point::ORIGIN, frame.size()),
@@ -167,10 +137,6 @@ impl canvas::Program<Message> for SierpinskiGraph {
 }
 
 impl SierpinskiGraph {
-    fn new() -> SierpinskiGraph {
-        SierpinskiGraph::default()
-    }
-
     fn redraw(&mut self) {
         self.cache.clear();
     }

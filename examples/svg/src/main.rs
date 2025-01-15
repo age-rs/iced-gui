@@ -1,8 +1,8 @@
-use iced::widget::{checkbox, column, container, svg};
-use iced::{color, Element, Length, Sandbox, Settings};
+use iced::widget::{center, checkbox, column, container, svg};
+use iced::{color, Element, Fill};
 
 pub fn main() -> iced::Result {
-    Tiger::run(Settings::default())
+    iced::run("SVG - Iced", Tiger::update, Tiger::view)
 }
 
 #[derive(Debug, Default)]
@@ -15,18 +15,8 @@ pub enum Message {
     ToggleColorFilter(bool),
 }
 
-impl Sandbox for Tiger {
-    type Message = Message;
-
-    fn new() -> Self {
-        Tiger::default()
-    }
-
-    fn title(&self) -> String {
-        String::from("SVG - Iced")
-    }
-
-    fn update(&mut self, message: Self::Message) {
+impl Tiger {
+    fn update(&mut self, message: Message) {
         match message {
             Message::ToggleColorFilter(apply_color_filter) => {
                 self.apply_color_filter = apply_color_filter;
@@ -34,39 +24,34 @@ impl Sandbox for Tiger {
         }
     }
 
-    fn view(&self) -> Element<Self::Message> {
+    fn view(&self) -> Element<Message> {
         let handle = svg::Handle::from_path(format!(
             "{}/resources/tiger.svg",
             env!("CARGO_MANIFEST_DIR")
         ));
 
-        let svg = svg(handle).width(Length::Fill).height(Length::Fill).style(
-            if self.apply_color_filter {
-                |_theme, _status| svg::Appearance {
-                    color: Some(color!(0x0000ff)),
-                }
-            } else {
-                |_theme, _status| svg::Appearance::default()
-            },
-        );
+        let svg =
+            svg(handle)
+                .width(Fill)
+                .height(Fill)
+                .style(|_theme, _status| svg::Style {
+                    color: if self.apply_color_filter {
+                        Some(color!(0x0000ff))
+                    } else {
+                        None
+                    },
+                });
 
         let apply_color_filter =
             checkbox("Apply a color filter", self.apply_color_filter)
                 .on_toggle(Message::ToggleColorFilter);
 
-        container(
-            column![
-                svg,
-                container(apply_color_filter).width(Length::Fill).center_x()
-            ]
-            .spacing(20)
-            .height(Length::Fill),
+        center(
+            column![svg, container(apply_color_filter).center_x(Fill)]
+                .spacing(20)
+                .height(Fill),
         )
-        .width(Length::Fill)
-        .height(Length::Fill)
         .padding(20)
-        .center_x()
-        .center_y()
         .into()
     }
 }

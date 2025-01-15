@@ -3,14 +3,15 @@ pub mod palette;
 
 pub use palette::Palette;
 
+use crate::Color;
+
 use std::fmt;
 use std::sync::Arc;
 
 /// A built-in theme.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Theme {
     /// The built-in light variant.
-    #[default]
     Light,
     /// The built-in dark variant.
     Dark,
@@ -52,6 +53,8 @@ pub enum Theme {
     Nightfly,
     /// The built-in Oxocarbon variant.
     Oxocarbon,
+    /// The built-in Ferra variant:
+    Ferra,
     /// A [`Theme`] that uses a [`Custom`] palette.
     Custom(Arc<Custom>),
 }
@@ -80,6 +83,7 @@ impl Theme {
         Self::Moonfly,
         Self::Nightfly,
         Self::Oxocarbon,
+        Self::Ferra,
     ];
 
     /// Creates a new custom [`Theme`] from the given [`Palette`].
@@ -121,6 +125,7 @@ impl Theme {
             Self::Moonfly => Palette::MOONFLY,
             Self::Nightfly => Palette::NIGHTFLY,
             Self::Oxocarbon => Palette::OXOCARBON,
+            Self::Ferra => Palette::FERRA,
             Self::Custom(custom) => custom.palette,
         }
     }
@@ -151,8 +156,34 @@ impl Theme {
             Self::Moonfly => &palette::EXTENDED_MOONFLY,
             Self::Nightfly => &palette::EXTENDED_NIGHTFLY,
             Self::Oxocarbon => &palette::EXTENDED_OXOCARBON,
+            Self::Ferra => &palette::EXTENDED_FERRA,
             Self::Custom(custom) => &custom.extended,
         }
+    }
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        #[cfg(feature = "auto-detect-theme")]
+        {
+            use std::sync::LazyLock;
+
+            static DEFAULT: LazyLock<Theme> = LazyLock::new(|| {
+                match dark_light::detect()
+                    .unwrap_or(dark_light::Mode::Unspecified)
+                {
+                    dark_light::Mode::Dark => Theme::Dark,
+                    dark_light::Mode::Light | dark_light::Mode::Unspecified => {
+                        Theme::Light
+                    }
+                }
+            });
+
+            DEFAULT.clone()
+        }
+
+        #[cfg(not(feature = "auto-detect-theme"))]
+        Theme::Light
     }
 }
 
@@ -180,6 +211,7 @@ impl fmt::Display for Theme {
             Self::Moonfly => write!(f, "Moonfly"),
             Self::Nightfly => write!(f, "Nightfly"),
             Self::Oxocarbon => write!(f, "Oxocarbon"),
+            Self::Ferra => write!(f, "Ferra"),
             Self::Custom(custom) => custom.fmt(f),
         }
     }
@@ -217,5 +249,37 @@ impl Custom {
 impl fmt::Display for Custom {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)
+    }
+}
+
+/// The base style of a [`Theme`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Style {
+    /// The background [`Color`] of the application.
+    pub background_color: Color,
+
+    /// The default text [`Color`] of the application.
+    pub text_color: Color,
+}
+
+/// The default blank style of a [`Theme`].
+pub trait Base {
+    /// Returns the default base [`Style`] of a [`Theme`].
+    fn base(&self) -> Style;
+}
+
+impl Base for Theme {
+    fn base(&self) -> Style {
+        default(self)
+    }
+}
+
+/// The default [`Style`] of a built-in [`Theme`].
+pub fn default(theme: &Theme) -> Style {
+    let palette = theme.extended_palette();
+
+    Style {
+        background_color: palette.background.base.color,
+        text_color: palette.background.base.text,
     }
 }

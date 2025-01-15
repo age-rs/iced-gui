@@ -1,6 +1,63 @@
-//! Create choices using radio buttons.
+//! Radio buttons let users choose a single option from a bunch of options.
+//!
+//! # Example
+//! ```no_run
+//! # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+//! # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+//! #
+//! use iced::widget::{column, radio};
+//!
+//! struct State {
+//!    selection: Option<Choice>,
+//! }
+//!
+//! #[derive(Debug, Clone, Copy)]
+//! enum Message {
+//!     RadioSelected(Choice),
+//! }
+//!
+//! #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//! enum Choice {
+//!     A,
+//!     B,
+//!     C,
+//!     All,
+//! }
+//!
+//! fn view(state: &State) -> Element<'_, Message> {
+//!     let a = radio(
+//!         "A",
+//!         Choice::A,
+//!         state.selection,
+//!         Message::RadioSelected,
+//!     );
+//!
+//!     let b = radio(
+//!         "B",
+//!         Choice::B,
+//!         state.selection,
+//!         Message::RadioSelected,
+//!     );
+//!
+//!     let c = radio(
+//!         "C",
+//!         Choice::C,
+//!         state.selection,
+//!         Message::RadioSelected,
+//!     );
+//!
+//!     let all = radio(
+//!         "All of the above",
+//!         Choice::All,
+//!         state.selection,
+//!         Message::RadioSelected
+//!     );
+//!
+//!     column![a, b, c, all].into()
+//! }
+//! ```
 use crate::core::alignment;
-use crate::core::event::{self, Event};
+use crate::core::border::{self, Border};
 use crate::core::layout;
 use crate::core::mouse;
 use crate::core::renderer;
@@ -8,8 +65,9 @@ use crate::core::text;
 use crate::core::touch;
 use crate::core::widget;
 use crate::core::widget::tree::{self, Tree};
+use crate::core::window;
 use crate::core::{
-    Background, Border, Clipboard, Color, Element, Layout, Length, Pixels,
+    Background, Clipboard, Color, Element, Event, Layout, Length, Pixels,
     Rectangle, Shell, Size, Theme, Widget,
 };
 
@@ -17,58 +75,64 @@ use crate::core::{
 ///
 /// # Example
 /// ```no_run
-/// # type Radio<Message> =
-/// #     iced_widget::Radio<Message, iced_widget::Theme, iced_widget::renderer::Renderer>;
+/// # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+/// # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
 /// #
-/// # use iced_widget::column;
+/// use iced::widget::{column, radio};
+///
+/// struct State {
+///    selection: Option<Choice>,
+/// }
+///
+/// #[derive(Debug, Clone, Copy)]
+/// enum Message {
+///     RadioSelected(Choice),
+/// }
+///
 /// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// pub enum Choice {
+/// enum Choice {
 ///     A,
 ///     B,
 ///     C,
 ///     All,
 /// }
 ///
-/// #[derive(Debug, Clone, Copy)]
-/// pub enum Message {
-///     RadioSelected(Choice),
+/// fn view(state: &State) -> Element<'_, Message> {
+///     let a = radio(
+///         "A",
+///         Choice::A,
+///         state.selection,
+///         Message::RadioSelected,
+///     );
+///
+///     let b = radio(
+///         "B",
+///         Choice::B,
+///         state.selection,
+///         Message::RadioSelected,
+///     );
+///
+///     let c = radio(
+///         "C",
+///         Choice::C,
+///         state.selection,
+///         Message::RadioSelected,
+///     );
+///
+///     let all = radio(
+///         "All of the above",
+///         Choice::All,
+///         state.selection,
+///         Message::RadioSelected
+///     );
+///
+///     column![a, b, c, all].into()
 /// }
-///
-/// let selected_choice = Some(Choice::A);
-///
-/// let a = Radio::new(
-///     "A",
-///     Choice::A,
-///     selected_choice,
-///     Message::RadioSelected,
-/// );
-///
-/// let b = Radio::new(
-///     "B",
-///     Choice::B,
-///     selected_choice,
-///     Message::RadioSelected,
-/// );
-///
-/// let c = Radio::new(
-///     "C",
-///     Choice::C,
-///     selected_choice,
-///     Message::RadioSelected,
-/// );
-///
-/// let all = Radio::new(
-///     "All of the above",
-///     Choice::All,
-///     selected_choice,
-///     Message::RadioSelected
-/// );
-///
-/// let content = column![a, b, c, all];
 /// ```
 #[allow(missing_debug_implementations)]
-pub struct Radio<Message, Theme = crate::Theme, Renderer = crate::Renderer>
+pub struct Radio<'a, Message, Theme = crate::Theme, Renderer = crate::Renderer>
 where
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     is_selected: bool,
@@ -80,13 +144,16 @@ where
     text_size: Option<Pixels>,
     text_line_height: text::LineHeight,
     text_shaping: text::Shaping,
+    text_wrapping: text::Wrapping,
     font: Option<Renderer::Font>,
-    style: Style<Theme>,
+    class: Theme::Class<'a>,
+    last_status: Option<Status>,
 }
 
-impl<Message, Theme, Renderer> Radio<Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> Radio<'a, Message, Theme, Renderer>
 where
     Message: Clone,
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     /// The default size of a [`Radio`] button.
@@ -102,7 +169,7 @@ where
     ///   * the label of the [`Radio`] button
     ///   * the current selected value
     ///   * a function that will be called when the [`Radio`] is selected. It
-    ///   receives the value of the radio and must produce a `Message`.
+    ///     receives the value of the radio and must produce a `Message`.
     pub fn new<F, V>(
         label: impl Into<String>,
         value: V,
@@ -110,7 +177,6 @@ where
         f: F,
     ) -> Self
     where
-        Theme: DefaultStyle,
         V: Eq + Copy,
         F: FnOnce(V) -> Message,
     {
@@ -120,12 +186,14 @@ where
             label: label.into(),
             width: Length::Shrink,
             size: Self::DEFAULT_SIZE,
-            spacing: Self::DEFAULT_SPACING, //15
+            spacing: Self::DEFAULT_SPACING,
             text_size: None,
             text_line_height: text::LineHeight::default(),
-            text_shaping: text::Shaping::Basic,
+            text_shaping: text::Shaping::default(),
+            text_wrapping: text::Wrapping::default(),
             font: None,
-            style: Theme::default_style(),
+            class: Theme::default(),
+            last_status: None,
         }
     }
 
@@ -168,6 +236,12 @@ where
         self
     }
 
+    /// Sets the [`text::Wrapping`] strategy of the [`Radio`] button.
+    pub fn text_wrapping(mut self, wrapping: text::Wrapping) -> Self {
+        self.text_wrapping = wrapping;
+        self
+    }
+
     /// Sets the text font of the [`Radio`] button.
     pub fn font(mut self, font: impl Into<Renderer::Font>) -> Self {
         self.font = Some(font.into());
@@ -175,16 +249,29 @@ where
     }
 
     /// Sets the style of the [`Radio`] button.
-    pub fn style(mut self, style: fn(&Theme, Status) -> Appearance) -> Self {
-        self.style = style;
+    #[must_use]
+    pub fn style(mut self, style: impl Fn(&Theme, Status) -> Style + 'a) -> Self
+    where
+        Theme::Class<'a>: From<StyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets the style class of the [`Radio`] button.
+    #[cfg(feature = "advanced")]
+    #[must_use]
+    pub fn class(mut self, class: impl Into<Theme::Class<'a>>) -> Self {
+        self.class = class.into();
         self
     }
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for Radio<Message, Theme, Renderer>
+    for Radio<'_, Message, Theme, Renderer>
 where
     Message: Clone,
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     fn tag(&self) -> tree::Tag {
@@ -230,12 +317,13 @@ where
                     alignment::Horizontal::Left,
                     alignment::Vertical::Top,
                     self.text_shaping,
+                    self.text_wrapping,
                 )
             },
         )
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         _state: &mut Tree,
         event: Event,
@@ -245,20 +333,37 @@ where
         _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 if cursor.is_over(layout.bounds()) {
                     shell.publish(self.on_click.clone());
-
-                    return event::Status::Captured;
+                    shell.capture_event();
                 }
             }
             _ => {}
         }
 
-        event::Status::Ignored
+        let current_status = {
+            let is_mouse_over = cursor.is_over(layout.bounds());
+            let is_selected = self.is_selected;
+
+            if is_mouse_over {
+                Status::Hovered { is_selected }
+            } else {
+                Status::Active { is_selected }
+            }
+        };
+
+        if let Event::Window(window::Event::RedrawRequested(_now)) = event {
+            self.last_status = Some(current_status);
+        } else if self
+            .last_status
+            .is_some_and(|last_status| last_status != current_status)
+        {
+            shell.request_redraw();
+        }
     }
 
     fn mouse_interaction(
@@ -281,23 +386,19 @@ where
         tree: &Tree,
         renderer: &mut Renderer,
         theme: &Theme,
-        style: &renderer::Style,
+        defaults: &renderer::Style,
         layout: Layout<'_>,
-        cursor: mouse::Cursor,
+        _cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        let is_mouse_over = cursor.is_over(layout.bounds());
-        let is_selected = self.is_selected;
-
         let mut children = layout.children();
 
-        let status = if is_mouse_over {
-            Status::Hovered { is_selected }
-        } else {
-            Status::Active { is_selected }
-        };
-
-        let appearance = (self.style)(theme, status);
+        let style = theme.style(
+            &self.class,
+            self.last_status.unwrap_or(Status::Active {
+                is_selected: self.is_selected,
+            }),
+        );
 
         {
             let layout = children.next().unwrap();
@@ -311,12 +412,12 @@ where
                     bounds,
                     border: Border {
                         radius: (size / 2.0).into(),
-                        width: appearance.border_width,
-                        color: appearance.border_color,
+                        width: style.border_width,
+                        color: style.border_color,
                     },
                     ..renderer::Quad::default()
                 },
-                appearance.background,
+                style.background,
             );
 
             if self.is_selected {
@@ -328,24 +429,26 @@ where
                             width: bounds.width - dot_size,
                             height: bounds.height - dot_size,
                         },
-                        border: Border::rounded(dot_size / 2.0),
+                        border: border::rounded(dot_size / 2.0),
                         ..renderer::Quad::default()
                     },
-                    appearance.dot_color,
+                    style.dot_color,
                 );
             }
         }
 
         {
             let label_layout = children.next().unwrap();
+            let state: &widget::text::State<Renderer::Paragraph> =
+                tree.state.downcast_ref();
 
             crate::text::draw(
                 renderer,
-                style,
+                defaults,
                 label_layout,
-                tree.state.downcast_ref(),
-                crate::text::Appearance {
-                    color: appearance.text_color,
+                state.0.raw(),
+                crate::text::Style {
+                    color: style.text_color,
                 },
                 viewport,
             );
@@ -353,15 +456,15 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> From<Radio<Message, Theme, Renderer>>
+impl<'a, Message, Theme, Renderer> From<Radio<'a, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a + Clone,
-    Theme: 'a,
+    Theme: 'a + Catalog,
     Renderer: 'a + text::Renderer,
 {
     fn from(
-        radio: Radio<Message, Theme, Renderer>,
+        radio: Radio<'a, Message, Theme, Renderer>,
     ) -> Element<'a, Message, Theme, Renderer> {
         Element::new(radio)
     }
@@ -383,8 +486,8 @@ pub enum Status {
 }
 
 /// The appearance of a radio button.
-#[derive(Debug, Clone, Copy)]
-pub struct Appearance {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Style {
     /// The [`Background`] of the radio button.
     pub background: Background,
     /// The [`Color`] of the dot of the radio button.
@@ -397,32 +500,38 @@ pub struct Appearance {
     pub text_color: Option<Color>,
 }
 
-/// The style of a [`Radio`] button.
-pub type Style<Theme> = fn(&Theme, Status) -> Appearance;
+/// The theme catalog of a [`Radio`].
+pub trait Catalog {
+    /// The item class of the [`Catalog`].
+    type Class<'a>;
 
-/// The default style of a [`Radio`] button.
-pub trait DefaultStyle {
-    /// Returns the default style of a [`Radio`] button.
-    fn default_style() -> Style<Self>;
+    /// The default class produced by the [`Catalog`].
+    fn default<'a>() -> Self::Class<'a>;
+
+    /// The [`Style`] of a class with the given status.
+    fn style(&self, class: &Self::Class<'_>, status: Status) -> Style;
 }
 
-impl DefaultStyle for Theme {
-    fn default_style() -> Style<Self> {
-        default
+/// A styling function for a [`Radio`].
+pub type StyleFn<'a, Theme> = Box<dyn Fn(&Theme, Status) -> Style + 'a>;
+
+impl Catalog for Theme {
+    type Class<'a> = StyleFn<'a, Self>;
+
+    fn default<'a>() -> Self::Class<'a> {
+        Box::new(default)
+    }
+
+    fn style(&self, class: &Self::Class<'_>, status: Status) -> Style {
+        class(self, status)
     }
 }
 
-impl DefaultStyle for Appearance {
-    fn default_style() -> Style<Self> {
-        |appearance, _status| *appearance
-    }
-}
-
 /// The default style of a [`Radio`] button.
-pub fn default(theme: &Theme, status: Status) -> Appearance {
+pub fn default(theme: &Theme, status: Status) -> Style {
     let palette = theme.extended_palette();
 
-    let active = Appearance {
+    let active = Style {
         background: Color::TRANSPARENT.into(),
         dot_color: palette.primary.strong.color,
         border_width: 1.0,
@@ -432,7 +541,7 @@ pub fn default(theme: &Theme, status: Status) -> Appearance {
 
     match status {
         Status::Active { .. } => active,
-        Status::Hovered { .. } => Appearance {
+        Status::Hovered { .. } => Style {
             dot_color: palette.primary.strong.color,
             background: palette.primary.weak.color.into(),
             ..active

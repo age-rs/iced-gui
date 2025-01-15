@@ -2,13 +2,13 @@ use iced::widget::{
     button, column, horizontal_space, lazy, pick_list, row, scrollable, text,
     text_input,
 };
-use iced::{Element, Length, Sandbox, Settings};
+use iced::{Element, Fill};
 
 use std::collections::HashSet;
 use std::hash::Hash;
 
 pub fn main() -> iced::Result {
-    App::run(Settings::default())
+    iced::run("Lazy - Iced", App::update, App::view)
 }
 
 struct App {
@@ -120,17 +120,7 @@ enum Message {
     ItemColorChanged(Item, Color),
 }
 
-impl Sandbox for App {
-    type Message = Message;
-
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn title(&self) -> String {
-        String::from("Lazy - Iced")
-    }
-
+impl App {
     fn update(&mut self, message: Message) {
         match message {
             Message::InputChanged(input) => {
@@ -183,7 +173,7 @@ impl Sandbox for App {
                     .style(button::danger);
 
                 row![
-                    text(&item.name).color(item.color),
+                    text(item.name.clone()).color(item.color),
                     horizontal_space(),
                     pick_list(Color::ALL, Some(item.color), move |color| {
                         Message::ItemColorChanged(item.clone(), color)
@@ -197,12 +187,12 @@ impl Sandbox for App {
         });
 
         column![
-            scrollable(options).height(Length::Fill),
+            scrollable(options).height(Fill),
             row![
                 text_input("Add a new option", &self.input)
                     .on_input(Message::InputChanged)
                     .on_submit(Message::AddItem(self.input.clone())),
-                button(text(format!("Toggle Order ({})", self.order)))
+                button(text!("Toggle Order ({})", self.order))
                     .on_press(Message::ToggleOrder)
             ]
             .spacing(10)

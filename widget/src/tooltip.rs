@@ -1,6 +1,27 @@
-//! Display a widget over another.
+//! Tooltips display a hint of information over some element when hovered.
+//!
+//! # Example
+//! ```no_run
+//! # mod iced { pub mod widget { pub use iced_widget::*; } }
+//! # pub type State = ();
+//! # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+//! use iced::widget::{container, tooltip};
+//!
+//! enum Message {
+//!     // ...
+//! }
+//!
+//! fn view(_state: &State) -> Element<'_, Message> {
+//!     tooltip(
+//!         "Hover me to display the tooltip!",
+//!         container("This is the tooltip contents!")
+//!             .padding(10)
+//!             .style(container::rounded_box),
+//!         tooltip::Position::Bottom,
+//!     ).into()
+//! }
+//! ```
 use crate::container;
-use crate::core::event::{self, Event};
 use crate::core::layout::{self, Layout};
 use crate::core::mouse;
 use crate::core::overlay;
@@ -8,11 +29,33 @@ use crate::core::renderer;
 use crate::core::text;
 use crate::core::widget::{self, Widget};
 use crate::core::{
-    Clipboard, Element, Length, Padding, Pixels, Point, Rectangle, Shell, Size,
-    Vector,
+    Clipboard, Element, Event, Length, Padding, Pixels, Point, Rectangle,
+    Shell, Size, Vector,
 };
 
 /// An element to display a widget over another.
+///
+/// # Example
+/// ```no_run
+/// # mod iced { pub mod widget { pub use iced_widget::*; } }
+/// # pub type State = ();
+/// # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+/// use iced::widget::{container, tooltip};
+///
+/// enum Message {
+///     // ...
+/// }
+///
+/// fn view(_state: &State) -> Element<'_, Message> {
+///     tooltip(
+///         "Hover me to display the tooltip!",
+///         container("This is the tooltip contents!")
+///             .padding(10)
+///             .style(container::rounded_box),
+///         tooltip::Position::Bottom,
+///     ).into()
+/// }
+/// ```
 #[allow(missing_debug_implementations)]
 pub struct Tooltip<
     'a,
@@ -20,6 +63,7 @@ pub struct Tooltip<
     Theme = crate::Theme,
     Renderer = crate::Renderer,
 > where
+    Theme: container::Catalog,
     Renderer: text::Renderer,
 {
     content: Element<'a, Message, Theme, Renderer>,
@@ -28,11 +72,12 @@ pub struct Tooltip<
     gap: f32,
     padding: f32,
     snap_within_viewport: bool,
-    style: container::Style<Theme>,
+    class: Theme::Class<'a>,
 }
 
 impl<'a, Message, Theme, Renderer> Tooltip<'a, Message, Theme, Renderer>
 where
+    Theme: container::Catalog,
     Renderer: text::Renderer,
 {
     /// The default padding of a [`Tooltip`] drawn by this renderer.
@@ -45,10 +90,7 @@ where
         content: impl Into<Element<'a, Message, Theme, Renderer>>,
         tooltip: impl Into<Element<'a, Message, Theme, Renderer>>,
         position: Position,
-    ) -> Self
-    where
-        Theme: container::DefaultStyle,
-    {
+    ) -> Self {
         Tooltip {
             content: content.into(),
             tooltip: tooltip.into(),
@@ -56,7 +98,7 @@ where
             gap: 0.0,
             padding: Self::DEFAULT_PADDING,
             snap_within_viewport: true,
-            style: Theme::default_style(),
+            class: Theme::default(),
         }
     }
 
@@ -79,18 +121,31 @@ where
     }
 
     /// Sets the style of the [`Tooltip`].
+    #[must_use]
     pub fn style(
         mut self,
-        style: fn(&Theme, container::Status) -> container::Appearance,
-    ) -> Self {
-        self.style = style.into();
+        style: impl Fn(&Theme) -> container::Style + 'a,
+    ) -> Self
+    where
+        Theme::Class<'a>: From<container::StyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as container::StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets the style class of the [`Tooltip`].
+    #[cfg(feature = "advanced")]
+    #[must_use]
+    pub fn class(mut self, class: impl Into<Theme::Class<'a>>) -> Self {
+        self.class = class.into();
         self
     }
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for Tooltip<'a, Message, Theme, Renderer>
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Tooltip<'_, Message, Theme, Renderer>
 where
+    Theme: container::Catalog,
     Renderer: text::Renderer,
 {
     fn children(&self) -> Vec<widget::Tree> {
@@ -134,7 +189,7 @@ where
             .layout(&mut tree.children[0], renderer, limits)
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut widget::Tree,
         event: Event,
@@ -144,7 +199,7 @@ where
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         let state = tree.state.downcast_mut::<State>();
 
         let was_idle = *state == State::Idle;
@@ -158,9 +213,12 @@ where
 
         if was_idle != is_idle {
             shell.invalidate_layout();
+            shell.request_redraw();
+        } else if !is_idle && self.position == Position::FollowCursor {
+            shell.request_redraw();
         }
 
-        self.content.as_widget_mut().on_event(
+        self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
             layout,
@@ -169,7 +227,7 @@ where
             clipboard,
             shell,
             viewport,
-        )
+        );
     }
 
     fn mouse_interaction(
@@ -239,7 +297,7 @@ where
                 positioning: self.position,
                 gap: self.gap,
                 padding: self.padding,
-                style: self.style,
+                class: &self.class,
             })))
         } else {
             None
@@ -262,7 +320,7 @@ impl<'a, Message, Theme, Renderer> From<Tooltip<'a, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
-    Theme: 'a,
+    Theme: container::Catalog + 'a,
     Renderer: text::Renderer + 'a,
 {
     fn from(
@@ -273,11 +331,10 @@ where
 }
 
 /// The position of the tooltip. Defaults to following the cursor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Position {
-    /// The tooltip will follow the cursor.
-    FollowCursor,
     /// The tooltip will appear on the top of the widget.
+    #[default]
     Top,
     /// The tooltip will appear on the bottom of the widget.
     Bottom,
@@ -285,6 +342,8 @@ pub enum Position {
     Left,
     /// The tooltip will appear on the right of the widget.
     Right,
+    /// The tooltip will follow the cursor.
+    FollowCursor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -298,6 +357,7 @@ enum State {
 
 struct Overlay<'a, 'b, Message, Theme, Renderer>
 where
+    Theme: container::Catalog,
     Renderer: text::Renderer,
 {
     position: Point,
@@ -309,13 +369,13 @@ where
     positioning: Position,
     gap: f32,
     padding: f32,
-    style: container::Style<Theme>,
+    class: &'b Theme::Class<'a>,
 }
 
-impl<'a, 'b, Message, Theme, Renderer>
-    overlay::Overlay<Message, Theme, Renderer>
-    for Overlay<'a, 'b, Message, Theme, Renderer>
+impl<Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
+    for Overlay<'_, '_, Message, Theme, Renderer>
 where
+    Theme: container::Catalog,
     Renderer: text::Renderer,
 {
     fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
@@ -424,7 +484,7 @@ where
         layout: Layout<'_>,
         cursor_position: mouse::Cursor,
     ) {
-        let style = (self.style)(theme, container::Status::Idle);
+        let style = theme.style(self.class);
 
         container::draw_background(renderer, &style, layout.bounds());
 

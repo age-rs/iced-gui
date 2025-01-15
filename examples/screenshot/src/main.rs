@@ -1,12 +1,10 @@
-use iced::alignment;
-use iced::executor;
 use iced::keyboard;
 use iced::widget::{button, column, container, image, row, text, text_input};
 use iced::window;
 use iced::window::screenshot::{self, Screenshot};
 use iced::{
-    Alignment, Application, Command, ContentFit, Element, Length, Rectangle,
-    Subscription, Theme,
+    Center, ContentFit, Element, Fill, FillPortion, Rectangle, Subscription,
+    Task,
 };
 
 use ::image as img;
@@ -15,11 +13,14 @@ use ::image::ColorType;
 fn main() -> iced::Result {
     tracing_subscriber::fmt::init();
 
-    Example::run(iced::Settings::default())
+    iced::application("Screenshot - Iced", Example::update, Example::view)
+        .subscription(Example::subscription)
+        .run()
 }
 
+#[derive(Default)]
 struct Example {
-    screenshot: Option<Screenshot>,
+    screenshot: Option<(Screenshot, image::Handle)>,
     saved_png_path: Option<Result<String, PngError>>,
     png_saving: bool,
     crop_error: Option<screenshot::CropError>,
@@ -33,7 +34,7 @@ struct Example {
 enum Message {
     Crop,
     Screenshot,
-    ScreenshotData(Screenshot),
+    Screenshotted(Screenshot),
     Png,
     PngSaved(Result<String, PngError>),
     XInputChanged(Option<u32>),
@@ -42,48 +43,29 @@ enum Message {
     HeightInputChanged(Option<u32>),
 }
 
-impl Application for Example {
-    type Executor = executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = ();
-
-    fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        (
-            Example {
-                screenshot: None,
-                saved_png_path: None,
-                png_saving: false,
-                crop_error: None,
-                x_input_value: None,
-                y_input_value: None,
-                width_input_value: None,
-                height_input_value: None,
-            },
-            Command::none(),
-        )
-    }
-
-    fn title(&self) -> String {
-        "Screenshot".to_string()
-    }
-
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+impl Example {
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Screenshot => {
-                return iced::window::screenshot(
-                    window::Id::MAIN,
-                    Message::ScreenshotData,
-                );
+                return window::get_latest()
+                    .and_then(window::screenshot)
+                    .map(Message::Screenshotted);
             }
-            Message::ScreenshotData(screenshot) => {
-                self.screenshot = Some(screenshot);
+            Message::Screenshotted(screenshot) => {
+                self.screenshot = Some((
+                    screenshot.clone(),
+                    image::Handle::from_rgba(
+                        screenshot.size.width,
+                        screenshot.size.height,
+                        screenshot.bytes,
+                    ),
+                ));
             }
             Message::Png => {
-                if let Some(screenshot) = &self.screenshot {
+                if let Some((screenshot, _handle)) = &self.screenshot {
                     self.png_saving = true;
 
-                    return Command::perform(
+                    return Task::perform(
                         save_to_png(screenshot.clone()),
                         Message::PngSaved,
                     );
@@ -106,7 +88,7 @@ impl Application for Example {
                 self.height_input_value = new_value;
             }
             Message::Crop => {
-                if let Some(screenshot) = &self.screenshot {
+                if let Some((screenshot, _handle)) = &self.screenshot {
                     let cropped = screenshot.crop(Rectangle::<u32> {
                         x: self.x_input_value.unwrap_or(0),
                         y: self.y_input_value.unwrap_or(0),
@@ -116,7 +98,14 @@ impl Application for Example {
 
                     match cropped {
                         Ok(screenshot) => {
-                            self.screenshot = Some(screenshot);
+                            self.screenshot = Some((
+                                screenshot.clone(),
+                                image::Handle::from_rgba(
+                                    screenshot.size.width,
+                                    screenshot.size.height,
+                                    screenshot.bytes,
+                                ),
+                            ));
                             self.crop_error = None;
                         }
                         Err(crop_error) => {
@@ -127,70 +116,55 @@ impl Application for Example {
             }
         }
 
-        Command::none()
+        Task::none()
     }
 
-    fn view(&self) -> Element<'_, Self::Message> {
-        let image: Element<Message> = if let Some(screenshot) = &self.screenshot
-        {
-            image(image::Handle::from_pixels(
-                screenshot.size.width,
-                screenshot.size.height,
-                screenshot.clone(),
-            ))
-            .content_fit(ContentFit::Contain)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-        } else {
-            text("Press the button to take a screenshot!").into()
-        };
+    fn view(&self) -> Element<'_, Message> {
+        let image: Element<Message> =
+            if let Some((_screenshot, handle)) = &self.screenshot {
+                image(handle)
+                    .content_fit(ContentFit::Contain)
+                    .width(Fill)
+                    .height(Fill)
+                    .into()
+            } else {
+                text("Press the button to take a screenshot!").into()
+            };
 
         let image = container(image)
+            .center_y(FillPortion(2))
             .padding(10)
-            .style(container::rounded_box)
-            .width(Length::FillPortion(2))
-            .height(Length::Fill)
-            .center_x()
-            .center_y();
+            .style(container::rounded_box);
 
         let crop_origin_controls = row![
-            text("X:")
-                .vertical_alignment(alignment::Vertical::Center)
-                .width(30),
+            text("X:").width(30),
             numeric_input("0", self.x_input_value).map(Message::XInputChanged),
-            text("Y:")
-                .vertical_alignment(alignment::Vertical::Center)
-                .width(30),
+            text("Y:").width(30),
             numeric_input("0", self.y_input_value).map(Message::YInputChanged)
         ]
         .spacing(10)
-        .align_items(Alignment::Center);
+        .align_y(Center);
 
         let crop_dimension_controls = row![
-            text("W:")
-                .vertical_alignment(alignment::Vertical::Center)
-                .width(30),
+            text("W:").width(30),
             numeric_input("0", self.width_input_value)
                 .map(Message::WidthInputChanged),
-            text("H:")
-                .vertical_alignment(alignment::Vertical::Center)
-                .width(30),
+            text("H:").width(30),
             numeric_input("0", self.height_input_value)
                 .map(Message::HeightInputChanged)
         ]
         .spacing(10)
-        .align_items(Alignment::Center);
+        .align_y(Center);
 
         let crop_controls =
             column![crop_origin_controls, crop_dimension_controls]
                 .push_maybe(
                     self.crop_error
                         .as_ref()
-                        .map(|error| text(format!("Crop error! \n{error}"))),
+                        .map(|error| text!("Crop error! \n{error}")),
                 )
                 .spacing(10)
-                .align_items(Alignment::Center);
+                .align_x(Center);
 
         let controls = {
             let save_result =
@@ -206,8 +180,8 @@ impl Application for Example {
             column![
                 column![
                     button(centered_text("Screenshot!"))
-                        .padding([10, 20, 10, 20])
-                        .width(Length::Fill)
+                        .padding([10, 20])
+                        .width(Fill)
                         .on_press(Message::Screenshot),
                     if !self.png_saving {
                         button(centered_text("Save as png")).on_press_maybe(
@@ -218,8 +192,8 @@ impl Application for Example {
                             .style(button::secondary)
                     }
                     .style(button::secondary)
-                    .padding([10, 20, 10, 20])
-                    .width(Length::Fill)
+                    .padding([10, 20])
+                    .width(Fill)
                 ]
                 .spacing(10),
                 column![
@@ -227,39 +201,28 @@ impl Application for Example {
                     button(centered_text("Crop"))
                         .on_press(Message::Crop)
                         .style(button::danger)
-                        .padding([10, 20, 10, 20])
-                        .width(Length::Fill),
+                        .padding([10, 20])
+                        .width(Fill),
                 ]
                 .spacing(10)
-                .align_items(Alignment::Center),
+                .align_x(Center),
             ]
             .push_maybe(save_result.map(text))
             .spacing(40)
         };
 
-        let side_content = container(controls)
-            .align_x(alignment::Horizontal::Center)
-            .width(Length::FillPortion(1))
-            .height(Length::Fill)
-            .center_y()
-            .center_x();
+        let side_content = container(controls).center_y(Fill);
 
         let content = row![side_content, image]
             .spacing(10)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_items(Alignment::Center);
+            .width(Fill)
+            .height(Fill)
+            .align_y(Center);
 
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(10)
-            .center_x()
-            .center_y()
-            .into()
+        container(content).padding(10).into()
     }
 
-    fn subscription(&self) -> Subscription<Self::Message> {
+    fn subscription(&self) -> Subscription<Message> {
         use keyboard::key;
 
         keyboard::on_key_press(|key, _modifiers| {
@@ -315,8 +278,5 @@ fn numeric_input(
 }
 
 fn centered_text(content: &str) -> Element<'_, Message> {
-    text(content)
-        .width(Length::Fill)
-        .horizontal_alignment(alignment::Horizontal::Center)
-        .into()
+    text(content).width(Fill).align_x(Center).into()
 }

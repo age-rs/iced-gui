@@ -1,32 +1,23 @@
-use iced::alignment::{self, Alignment};
-use iced::font::{self, Font};
 use iced::keyboard;
 use iced::widget::{
-    self, button, checkbox, column, container, keyed_column, row, scrollable,
-    text, text_input, Text,
+    self, button, center, checkbox, column, container, keyed_column, row,
+    scrollable, text, text_input, Text,
 };
 use iced::window;
-use iced::{
-    Application, Command, Element, Length, Settings, Size, Subscription, Theme,
-};
+use iced::{Center, Element, Fill, Font, Subscription, Task as Command};
 
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-static INPUT_ID: Lazy<text_input::Id> = Lazy::new(text_input::Id::unique);
 
 pub fn main() -> iced::Result {
     #[cfg(not(target_arch = "wasm32"))]
     tracing_subscriber::fmt::init();
 
-    Todos::run(Settings {
-        window: window::Settings {
-            size: Size::new(500.0, 800.0),
-            ..window::Settings::default()
-        },
-        ..Settings::default()
-    })
+    iced::application(Todos::title, Todos::update, Todos::view)
+        .subscription(Todos::subscription)
+        .font(Todos::ICON_FONT)
+        .window_size((500.0, 800.0))
+        .run_with(Todos::new)
 }
 
 #[derive(Debug)]
@@ -47,7 +38,6 @@ struct State {
 #[derive(Debug, Clone)]
 enum Message {
     Loaded(Result<SavedState, LoadError>),
-    FontLoaded(Result<(), font::Error>),
     Saved(Result<(), SaveError>),
     InputChanged(String),
     CreateTask,
@@ -57,20 +47,13 @@ enum Message {
     ToggleFullscreen(window::Mode),
 }
 
-impl Application for Todos {
-    type Message = Message;
-    type Theme = Theme;
-    type Executor = iced::executor::Default;
-    type Flags = ();
+impl Todos {
+    const ICON_FONT: &'static [u8] = include_bytes!("../fonts/icons.ttf");
 
-    fn new(_flags: ()) -> (Todos, Command<Message>) {
+    fn new() -> (Self, Command<Message>) {
         (
-            Todos::Loading,
-            Command::batch(vec![
-                font::load(include_bytes!("../fonts/icons.ttf").as_slice())
-                    .map(Message::FontLoaded),
-                Command::perform(SavedState::load(), Message::Loaded),
-            ]),
+            Self::Loading,
+            Command::perform(SavedState::load(), Message::Loaded),
         )
     }
 
@@ -101,7 +84,7 @@ impl Application for Todos {
                     _ => {}
                 }
 
-                text_input::focus(INPUT_ID.clone())
+                text_input::focus("new-task")
             }
             Todos::Loaded(state) => {
                 let mut saved = false;
@@ -165,10 +148,9 @@ impl Application for Todos {
                             widget::focus_next()
                         }
                     }
-                    Message::ToggleFullscreen(mode) => {
-                        window::change_mode(window::Id::MAIN, mode)
-                    }
-                    _ => Command::none(),
+                    Message::ToggleFullscreen(mode) => window::get_latest()
+                        .and_then(move |window| window::set_mode(window, mode)),
+                    Message::Loaded(_) => Command::none(),
                 };
 
                 if !saved {
@@ -207,17 +189,18 @@ impl Application for Todos {
                 ..
             }) => {
                 let title = text("todos")
-                    .width(Length::Fill)
+                    .width(Fill)
                     .size(100)
                     .color([0.5, 0.5, 0.5])
-                    .horizontal_alignment(alignment::Horizontal::Center);
+                    .align_x(Center);
 
                 let input = text_input("What needs to be done?", input_value)
-                    .id(INPUT_ID.clone())
+                    .id("new-task")
                     .on_input(Message::InputChanged)
                     .on_submit(Message::CreateTask)
                     .padding(15)
-                    .size(30);
+                    .size(30)
+                    .align_x(Center);
 
                 let controls = view_controls(tasks, *filter);
                 let filtered_tasks =
@@ -254,7 +237,7 @@ impl Application for Todos {
                     .spacing(20)
                     .max_width(800);
 
-                scrollable(container(content).padding(40).center_x()).into()
+                scrollable(container(content).center_x(Fill).padding(40)).into()
             }
         }
     }
@@ -354,7 +337,7 @@ impl Task {
             TaskState::Idle => {
                 let checkbox = checkbox(&self.description, self.completed)
                     .on_toggle(TaskMessage::Completed)
-                    .width(Length::Fill)
+                    .width(Fill)
                     .size(17)
                     .text_shaping(text::Shaping::Advanced);
 
@@ -366,7 +349,7 @@ impl Task {
                         .style(button::text),
                 ]
                 .spacing(20)
-                .align_items(Alignment::Center)
+                .align_y(Center)
                 .into()
             }
             TaskState::Editing => {
@@ -382,14 +365,14 @@ impl Task {
                     button(
                         row![delete_icon(), "Delete"]
                             .spacing(10)
-                            .align_items(Alignment::Center)
+                            .align_y(Center)
                     )
                     .on_press(TaskMessage::Delete)
                     .padding(10)
                     .style(button::danger)
                 ]
                 .spacing(20)
-                .align_items(Alignment::Center)
+                .align_y(Center)
                 .into()
             }
         }
@@ -412,21 +395,20 @@ fn view_controls(tasks: &[Task], current_filter: Filter) -> Element<Message> {
     };
 
     row![
-        text(format!(
+        text!(
             "{tasks_left} {} left",
             if tasks_left == 1 { "task" } else { "tasks" }
-        ))
-        .width(Length::Fill),
+        )
+        .width(Fill),
         row![
             filter_button("All", Filter::All, current_filter),
             filter_button("Active", Filter::Active, current_filter),
             filter_button("Completed", Filter::Completed, current_filter,),
         ]
-        .width(Length::Shrink)
         .spacing(10)
     ]
     .spacing(20)
-    .align_items(Alignment::Center)
+    .align_y(Center)
     .into()
 }
 
@@ -451,38 +433,28 @@ impl Filter {
 }
 
 fn loading_message<'a>() -> Element<'a, Message> {
-    container(
-        text("Loading...")
-            .horizontal_alignment(alignment::Horizontal::Center)
-            .size(50),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .center_y()
-    .into()
+    center(text("Loading...").width(Fill).align_x(Center).size(50)).into()
 }
 
 fn empty_message(message: &str) -> Element<'_, Message> {
-    container(
+    center(
         text(message)
-            .width(Length::Fill)
+            .width(Fill)
             .size(25)
-            .horizontal_alignment(alignment::Horizontal::Center)
+            .align_x(Center)
             .color([0.7, 0.7, 0.7]),
     )
     .height(200)
-    .center_y()
     .into()
 }
 
 // Fonts
-const ICONS: Font = Font::with_name("Iced-Todos-Icons");
 
 fn icon(unicode: char) -> Text<'static> {
     text(unicode.to_string())
-        .font(ICONS)
+        .font(Font::with_name("Iced-Todos-Icons"))
         .width(20)
-        .horizontal_alignment(alignment::Horizontal::Center)
+        .align_x(Center)
 }
 
 fn edit_icon() -> Text<'static> {
@@ -607,6 +579,52 @@ impl SavedState {
             .map_err(|_| SaveError::Write)?;
 
         let _ = wasm_timer::Delay::new(std::time::Duration::from_secs(2)).await;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use iced::{Settings, Theme};
+    use iced_test::selector::text;
+    use iced_test::{Error, Simulator};
+
+    fn simulator(todos: &Todos) -> Simulator<Message> {
+        Simulator::with_settings(
+            Settings {
+                fonts: vec![Todos::ICON_FONT.into()],
+                ..Settings::default()
+            },
+            todos.view(),
+        )
+    }
+
+    #[test]
+    fn it_creates_a_new_task() -> Result<(), Error> {
+        let (mut todos, _command) = Todos::new();
+        let _command = todos.update(Message::Loaded(Err(LoadError::File)));
+
+        let mut ui = simulator(&todos);
+        let _input = ui.click("new-task")?;
+
+        let _ = ui.typewrite("Create the universe");
+        let _ = ui.tap_key(keyboard::key::Named::Enter);
+
+        for message in ui.into_messages() {
+            let _command = todos.update(message);
+        }
+
+        let mut ui = simulator(&todos);
+        let _ = ui.find(text("Create the universe"))?;
+
+        let snapshot = ui.snapshot(&Theme::Dark)?;
+        assert!(
+            snapshot.matches_hash("snapshots/creates_a_new_task")?,
+            "snapshots should match!"
+        );
 
         Ok(())
     }
