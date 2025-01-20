@@ -1,20 +1,24 @@
-use iced::executor;
+use iced::border;
 use iced::keyboard;
 use iced::mouse;
 use iced::widget::{
-    button, canvas, checkbox, column, container, horizontal_space, pick_list,
-    row, scrollable, text,
+    button, canvas, center, checkbox, column, container, horizontal_rule,
+    horizontal_space, pick_list, pin, row, scrollable, stack, text,
+    vertical_rule,
 };
 use iced::{
-    color, Alignment, Application, Command, Element, Font, Length, Point,
-    Rectangle, Renderer, Settings, Subscription, Theme,
+    color, Center, Element, Fill, Font, Length, Point, Rectangle, Renderer,
+    Shrink, Subscription, Theme,
 };
 
 pub fn main() -> iced::Result {
-    Layout::run(Settings::default())
+    iced::application(Layout::title, Layout::update, Layout::view)
+        .subscription(Layout::subscription)
+        .theme(Layout::theme)
+        .run()
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 struct Layout {
     example: Example,
     explain: bool,
@@ -29,28 +33,12 @@ enum Message {
     ThemeSelected(Theme),
 }
 
-impl Application for Layout {
-    type Message = Message;
-    type Theme = Theme;
-    type Executor = executor::Default;
-    type Flags = ();
-
-    fn new(_flags: Self::Flags) -> (Self, Command<Message>) {
-        (
-            Self {
-                example: Example::default(),
-                explain: false,
-                theme: Theme::Light,
-            },
-            Command::none(),
-        )
-    }
-
+impl Layout {
     fn title(&self) -> String {
         format!("{} - Layout - Iced", self.example.title)
     }
 
-    fn update(&mut self, message: Self::Message) -> Command<Message> {
+    fn update(&mut self, message: Message) {
         match message {
             Message::Next => {
                 self.example = self.example.next();
@@ -65,8 +53,6 @@ impl Application for Layout {
                 self.theme = theme;
             }
         }
-
-        Command::none()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -90,24 +76,20 @@ impl Application for Layout {
             pick_list(Theme::ALL, Some(&self.theme), Message::ThemeSelected),
         ]
         .spacing(20)
-        .align_items(Alignment::Center);
+        .align_y(Center);
 
-        let example = container(if self.explain {
+        let example = center(if self.explain {
             self.example.view().explain(color!(0x0000ff))
         } else {
             self.example.view()
         })
-        .style(|theme, _status| {
+        .style(|theme| {
             let palette = theme.extended_palette();
 
-            container::Appearance::default()
-                .with_border(palette.background.strong.color, 4.0)
+            container::Style::default()
+                .border(border::color(palette.background.strong.color).width(4))
         })
-        .padding(4)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x()
-        .center_y();
+        .padding(4);
 
         let controls = row([
             (!self.example.is_first()).then_some(
@@ -166,6 +148,14 @@ impl Example {
             title: "Application",
             view: application,
         },
+        Self {
+            title: "Quotes",
+            view: quotes,
+        },
+        Self {
+            title: "Pinning",
+            view: pinning,
+        },
     ];
 
     fn is_first(self) -> bool {
@@ -211,12 +201,7 @@ impl Default for Example {
 }
 
 fn centered<'a>() -> Element<'a, Message> {
-    container(text("I am centered!").size(50))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x()
-        .center_y()
-        .into()
+    center(text("I am centered!").size(50)).into()
 }
 
 fn column_<'a>() -> Element<'a, Message> {
@@ -259,13 +244,13 @@ fn application<'a>() -> Element<'a, Message> {
             square(40),
         ]
         .padding(10)
-        .align_items(Alignment::Center),
+        .align_y(Center),
     )
-    .style(|theme, _status| {
+    .style(|theme| {
         let palette = theme.extended_palette();
 
-        container::Appearance::default()
-            .with_border(palette.background.strong.color, 1)
+        container::Style::default()
+            .border(border::color(palette.background.strong.color).width(1))
     });
 
     let sidebar = container(
@@ -273,30 +258,77 @@ fn application<'a>() -> Element<'a, Message> {
             .spacing(40)
             .padding(10)
             .width(200)
-            .align_items(Alignment::Center),
+            .align_x(Center),
     )
     .style(container::rounded_box)
-    .height(Length::Fill)
-    .center_y();
+    .center_y(Fill);
 
     let content = container(
         scrollable(
             column![
                 "Content!",
-                square(400),
-                square(200),
-                square(400),
+                row((1..10).map(|i| square(if i % 2 == 0 { 80 } else { 160 })))
+                    .spacing(20)
+                    .align_y(Center)
+                    .wrap(),
                 "The end"
             ]
             .spacing(40)
-            .align_items(Alignment::Center)
-            .width(Length::Fill),
+            .align_x(Center)
+            .width(Fill),
         )
-        .height(Length::Fill),
+        .height(Fill),
     )
     .padding(10);
 
     column![header, row![sidebar, content]].into()
+}
+
+fn quotes<'a>() -> Element<'a, Message> {
+    fn quote<'a>(
+        content: impl Into<Element<'a, Message>>,
+    ) -> Element<'a, Message> {
+        row![vertical_rule(2), content.into()]
+            .spacing(10)
+            .height(Shrink)
+            .into()
+    }
+
+    fn reply<'a>(
+        original: impl Into<Element<'a, Message>>,
+        reply: impl Into<Element<'a, Message>>,
+    ) -> Element<'a, Message> {
+        column![quote(original), reply.into()].spacing(10).into()
+    }
+
+    column![
+        reply(
+            reply("This is the original message", "This is a reply"),
+            "This is another reply",
+        ),
+        horizontal_rule(1),
+        "A separator ↑",
+    ]
+    .width(Shrink)
+    .spacing(10)
+    .into()
+}
+
+fn pinning<'a>() -> Element<'a, Message> {
+    column![
+        "The pin widget can be used to position a widget \
+        at some fixed coordinates inside some other widget.",
+        stack![
+            container(pin("• (50, 50)").x(50).y(50))
+                .width(500)
+                .height(500)
+                .style(container::bordered_box),
+            pin("• (300, 300)").x(300).y(300),
+        ]
+    ]
+    .align_x(Center)
+    .spacing(10)
+    .into()
 }
 
 fn square<'a>(size: impl Into<Length> + Copy) -> Element<'a, Message> {

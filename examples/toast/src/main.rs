@@ -1,21 +1,19 @@
 use iced::event::{self, Event};
-use iced::executor;
 use iced::keyboard;
 use iced::keyboard::key;
 use iced::widget::{
-    self, button, column, container, pick_list, row, slider, text, text_input,
+    self, button, center, column, pick_list, row, slider, text, text_input,
 };
-use iced::{
-    Alignment, Application, Command, Element, Length, Settings, Subscription,
-};
+use iced::{Center, Element, Fill, Subscription, Task};
 
 use toast::{Status, Toast};
 
 pub fn main() -> iced::Result {
-    App::run(Settings::default())
+    iced::application("Toast - Iced", App::update, App::view)
+        .subscription(App::subscription)
+        .run()
 }
 
-#[derive(Default)]
 struct App {
     toasts: Vec<Toast>,
     editing: Toast,
@@ -34,36 +32,24 @@ enum Message {
     Event(Event),
 }
 
-impl Application for App {
-    type Executor = executor::Default;
-    type Message = Message;
-    type Theme = iced::Theme;
-    type Flags = ();
-
-    fn new(_flags: ()) -> (Self, Command<Message>) {
-        (
-            App {
-                toasts: vec![Toast {
-                    title: "Example Toast".into(),
-                    body: "Add more toasts in the form below!".into(),
-                    status: Status::Primary,
-                }],
-                timeout_secs: toast::DEFAULT_TIMEOUT,
-                ..Default::default()
-            },
-            Command::none(),
-        )
+impl App {
+    fn new() -> Self {
+        App {
+            toasts: vec![Toast {
+                title: "Example Toast".into(),
+                body: "Add more toasts in the form below!".into(),
+                status: Status::Primary,
+            }],
+            timeout_secs: toast::DEFAULT_TIMEOUT,
+            editing: Toast::default(),
+        }
     }
 
-    fn title(&self) -> String {
-        String::from("Toast - Iced")
-    }
-
-    fn subscription(&self) -> Subscription<Self::Message> {
+    fn subscription(&self) -> Subscription<Message> {
         event::listen().map(Message::Event)
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Add => {
                 if !self.editing.title.is_empty()
@@ -71,27 +57,27 @@ impl Application for App {
                 {
                     self.toasts.push(std::mem::take(&mut self.editing));
                 }
-                Command::none()
+                Task::none()
             }
             Message::Close(index) => {
                 self.toasts.remove(index);
-                Command::none()
+                Task::none()
             }
             Message::Title(title) => {
                 self.editing.title = title;
-                Command::none()
+                Task::none()
             }
             Message::Body(body) => {
                 self.editing.body = body;
-                Command::none()
+                Task::none()
             }
             Message::Status(status) => {
                 self.editing.status = status;
-                Command::none()
+                Task::none()
             }
             Message::Timeout(timeout) => {
                 self.timeout_secs = timeout as u64;
-                Command::none()
+                Task::none()
             }
             Message::Event(Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(key::Named::Tab),
@@ -102,12 +88,12 @@ impl Application for App {
                 key: keyboard::Key::Named(key::Named::Tab),
                 ..
             })) => widget::focus_next(),
-            Message::Event(_) => Command::none(),
+            Message::Event(_) => Task::none(),
         }
     }
 
-    fn view<'a>(&'a self) -> Element<'a, Message> {
-        let subtitle = |title, content: Element<'a, Message>| {
+    fn view(&self) -> Element<'_, Message> {
+        let subtitle = |title, content: Element<'static, Message>| {
             column![text(title).size(14), content].spacing(5)
         };
 
@@ -116,7 +102,7 @@ impl Application for App {
                 .then_some(Message::Add),
         );
 
-        let content = container(
+        let content = center(
             column![
                 subtitle(
                     "Title",
@@ -139,13 +125,13 @@ impl Application for App {
                         Some(self.editing.status),
                         Message::Status
                     )
-                    .width(Length::Fill)
+                    .width(Fill)
                     .into()
                 ),
                 subtitle(
                     "Timeout",
                     row![
-                        text(format!("{:0>2} sec", self.timeout_secs)),
+                        text!("{:0>2} sec", self.timeout_secs),
                         slider(
                             1.0..=30.0,
                             self.timeout_secs as f64,
@@ -156,19 +142,21 @@ impl Application for App {
                     .spacing(5)
                     .into()
                 ),
-                column![add_toast].align_items(Alignment::End)
+                column![add_toast].align_x(Center)
             ]
             .spacing(10)
             .max_width(200),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x()
-        .center_y();
+        );
 
         toast::Manager::new(content, &self.toasts, Message::Close)
             .timeout(self.timeout_secs)
             .into()
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -181,7 +169,6 @@ mod toast {
     use iced::advanced::renderer;
     use iced::advanced::widget::{self, Operation, Tree};
     use iced::advanced::{Clipboard, Shell, Widget};
-    use iced::event::{self, Event};
     use iced::mouse;
     use iced::theme;
     use iced::widget::{
@@ -189,8 +176,8 @@ mod toast {
     };
     use iced::window;
     use iced::{
-        Alignment, Element, Length, Point, Rectangle, Renderer, Size, Theme,
-        Vector,
+        Alignment, Center, Element, Event, Fill, Length, Point, Rectangle,
+        Renderer, Size, Theme, Vector,
     };
 
     pub const DEFAULT_TIMEOUT: u64 = 5;
@@ -257,9 +244,9 @@ mod toast {
                                     .on_press((on_close)(index))
                                     .padding(3),
                             ]
-                            .align_items(Alignment::Center)
+                            .align_y(Center)
                         )
-                        .width(Length::Fill)
+                        .width(Fill)
                         .padding(5)
                         .style(match toast.status {
                             Status::Primary => primary,
@@ -269,7 +256,7 @@ mod toast {
                         }),
                         horizontal_rule(1),
                         container(text(toast.body.as_str()))
-                            .width(Length::Fill)
+                            .width(Fill)
                             .padding(5)
                             .style(container::rounded_box),
                     ])
@@ -294,7 +281,7 @@ mod toast {
         }
     }
 
-    impl<'a, Message> Widget<Message, Theme, Renderer> for Manager<'a, Message> {
+    impl<Message> Widget<Message, Theme, Renderer> for Manager<'_, Message> {
         fn size(&self) -> Size<Length> {
             self.content.as_widget().size()
         }
@@ -359,7 +346,7 @@ mod toast {
             state: &mut Tree,
             layout: Layout<'_>,
             renderer: &Renderer,
-            operation: &mut dyn Operation<Message>,
+            operation: &mut dyn Operation,
         ) {
             operation.container(None, layout.bounds(), &mut |operation| {
                 self.content.as_widget().operate(
@@ -371,7 +358,7 @@ mod toast {
             });
         }
 
-        fn on_event(
+        fn update(
             &mut self,
             state: &mut Tree,
             event: Event,
@@ -381,8 +368,8 @@ mod toast {
             clipboard: &mut dyn Clipboard,
             shell: &mut Shell<'_, Message>,
             viewport: &Rectangle,
-        ) -> event::Status {
-            self.content.as_widget_mut().on_event(
+        ) {
+            self.content.as_widget_mut().update(
                 &mut state.children[0],
                 event,
                 layout,
@@ -391,7 +378,7 @@ mod toast {
                 clipboard,
                 shell,
                 viewport,
-            )
+            );
         }
 
         fn draw(
@@ -477,8 +464,8 @@ mod toast {
         timeout_secs: u64,
     }
 
-    impl<'a, 'b, Message> overlay::Overlay<Message, Theme, Renderer>
-        for Overlay<'a, 'b, Message>
+    impl<Message> overlay::Overlay<Message, Theme, Renderer>
+        for Overlay<'_, '_, Message>
     {
         fn layout(
             &mut self,
@@ -491,8 +478,8 @@ mod toast {
                 layout::flex::Axis::Vertical,
                 renderer,
                 &limits,
-                Length::Fill,
-                Length::Fill,
+                Fill,
+                Fill,
                 10.into(),
                 10.0,
                 Alignment::End,
@@ -502,7 +489,7 @@ mod toast {
             .translate(Vector::new(self.position.x, self.position.y))
         }
 
-        fn on_event(
+        fn update(
             &mut self,
             event: Event,
             layout: Layout<'_>,
@@ -510,12 +497,8 @@ mod toast {
             renderer: &Renderer,
             clipboard: &mut dyn Clipboard,
             shell: &mut Shell<'_, Message>,
-        ) -> event::Status {
-            if let Event::Window(_, window::Event::RedrawRequested(now)) =
-                &event
-            {
-                let mut next_redraw: Option<window::RedrawRequest> = None;
-
+        ) {
+            if let Event::Window(window::Event::RedrawRequested(now)) = &event {
                 self.instants.iter_mut().enumerate().for_each(
                     |(index, maybe_instant)| {
                         if let Some(instant) = maybe_instant.as_mut() {
@@ -526,55 +509,43 @@ mod toast {
                             if remaining == Duration::ZERO {
                                 maybe_instant.take();
                                 shell.publish((self.on_close)(index));
-                                next_redraw =
-                                    Some(window::RedrawRequest::NextFrame);
                             } else {
-                                let redraw_at =
-                                    window::RedrawRequest::At(*now + remaining);
-                                next_redraw = next_redraw
-                                    .map(|redraw| redraw.min(redraw_at))
-                                    .or(Some(redraw_at));
+                                shell.request_redraw_at(*now + remaining);
                             }
                         }
                     },
                 );
-
-                if let Some(redraw) = next_redraw {
-                    shell.request_redraw(redraw);
-                }
             }
 
             let viewport = layout.bounds();
 
-            self.toasts
+            for (((child, state), layout), instant) in self
+                .toasts
                 .iter_mut()
                 .zip(self.state.iter_mut())
                 .zip(layout.children())
                 .zip(self.instants.iter_mut())
-                .map(|(((child, state), layout), instant)| {
-                    let mut local_messages = vec![];
-                    let mut local_shell = Shell::new(&mut local_messages);
+            {
+                let mut local_messages = vec![];
+                let mut local_shell = Shell::new(&mut local_messages);
 
-                    let status = child.as_widget_mut().on_event(
-                        state,
-                        event.clone(),
-                        layout,
-                        cursor,
-                        renderer,
-                        clipboard,
-                        &mut local_shell,
-                        &viewport,
-                    );
+                child.as_widget_mut().update(
+                    state,
+                    event.clone(),
+                    layout,
+                    cursor,
+                    renderer,
+                    clipboard,
+                    &mut local_shell,
+                    &viewport,
+                );
 
-                    if !local_shell.is_empty() {
-                        instant.take();
-                    }
+                if !local_shell.is_empty() {
+                    instant.take();
+                }
 
-                    shell.merge(local_shell, std::convert::identity);
-
-                    status
-                })
-                .fold(event::Status::Ignored, event::Status::merge)
+                shell.merge(local_shell, std::convert::identity);
+            }
         }
 
         fn draw(
@@ -603,7 +574,7 @@ mod toast {
             &mut self,
             layout: Layout<'_>,
             renderer: &Renderer,
-            operation: &mut dyn widget::Operation<Message>,
+            operation: &mut dyn widget::Operation,
         ) {
             operation.container(None, layout.bounds(), &mut |operation| {
                 self.toasts
@@ -659,45 +630,33 @@ mod toast {
         }
     }
 
-    fn styled(pair: theme::palette::Pair) -> container::Appearance {
-        container::Appearance {
+    fn styled(pair: theme::palette::Pair) -> container::Style {
+        container::Style {
             background: Some(pair.color.into()),
             text_color: pair.text.into(),
             ..Default::default()
         }
     }
 
-    fn primary(
-        theme: &Theme,
-        _status: container::Status,
-    ) -> container::Appearance {
+    fn primary(theme: &Theme) -> container::Style {
         let palette = theme.extended_palette();
 
         styled(palette.primary.weak)
     }
 
-    fn secondary(
-        theme: &Theme,
-        _status: container::Status,
-    ) -> container::Appearance {
+    fn secondary(theme: &Theme) -> container::Style {
         let palette = theme.extended_palette();
 
         styled(palette.secondary.weak)
     }
 
-    fn success(
-        theme: &Theme,
-        _status: container::Status,
-    ) -> container::Appearance {
+    fn success(theme: &Theme) -> container::Style {
         let palette = theme.extended_palette();
 
         styled(palette.success.weak)
     }
 
-    fn danger(
-        theme: &Theme,
-        _status: container::Status,
-    ) -> container::Appearance {
+    fn danger(theme: &Theme) -> container::Style {
         let palette = theme.extended_palette();
 
         styled(palette.danger.weak)

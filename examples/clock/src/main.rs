@@ -1,51 +1,35 @@
-use iced::executor;
 use iced::mouse;
+use iced::time;
 use iced::widget::canvas::{stroke, Cache, Geometry, LineCap, Path, Stroke};
 use iced::widget::{canvas, container};
+use iced::{alignment, Radians};
 use iced::{
-    Application, Command, Element, Length, Point, Rectangle, Renderer,
-    Settings, Subscription, Theme, Vector,
+    Degrees, Element, Fill, Font, Point, Rectangle, Renderer, Size,
+    Subscription, Theme, Vector,
 };
 
 pub fn main() -> iced::Result {
-    Clock::run(Settings {
-        antialiasing: true,
-        ..Settings::default()
-    })
+    tracing_subscriber::fmt::init();
+
+    iced::application("Clock - Iced", Clock::update, Clock::view)
+        .subscription(Clock::subscription)
+        .theme(Clock::theme)
+        .antialiasing(true)
+        .run()
 }
 
 struct Clock {
-    now: time::OffsetDateTime,
+    now: chrono::DateTime<chrono::Local>,
     clock: Cache,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum Message {
-    Tick(time::OffsetDateTime),
+    Tick(chrono::DateTime<chrono::Local>),
 }
 
-impl Application for Clock {
-    type Executor = executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = ();
-
-    fn new(_flags: ()) -> (Self, Command<Message>) {
-        (
-            Clock {
-                now: time::OffsetDateTime::now_local()
-                    .unwrap_or_else(|_| time::OffsetDateTime::now_utc()),
-                clock: Cache::default(),
-            },
-            Command::none(),
-        )
-    }
-
-    fn title(&self) -> String {
-        String::from("Clock - Iced")
-    }
-
-    fn update(&mut self, message: Message) -> Command<Message> {
+impl Clock {
+    fn update(&mut self, message: Message) {
         match message {
             Message::Tick(local_time) => {
                 let now = local_time;
@@ -56,33 +40,31 @@ impl Application for Clock {
                 }
             }
         }
-
-        Command::none()
     }
 
     fn view(&self) -> Element<Message> {
-        let canvas = canvas(self as &Self)
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let canvas = canvas(self as &Self).width(Fill).height(Fill);
 
-        container(canvas)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(20)
-            .into()
+        container(canvas).padding(20).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        iced::time::every(std::time::Duration::from_millis(500)).map(|_| {
-            Message::Tick(
-                time::OffsetDateTime::now_local()
-                    .unwrap_or_else(|_| time::OffsetDateTime::now_utc()),
-            )
-        })
+        time::every(time::Duration::from_millis(500))
+            .map(|_| Message::Tick(chrono::offset::Local::now()))
     }
 
     fn theme(&self) -> Theme {
-        Theme::TokyoNight
+        Theme::ALL[(self.now.timestamp() as usize / 10) % Theme::ALL.len()]
+            .clone()
+    }
+}
+
+impl Default for Clock {
+    fn default() -> Self {
+        Self {
+            now: chrono::offset::Local::now(),
+            clock: Cache::default(),
+        }
     }
 }
 
@@ -97,6 +79,8 @@ impl<Message> canvas::Program<Message> for Clock {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
+        use chrono::Timelike;
+
         let clock = self.clock.draw(renderer, bounds.size(), |frame| {
             let palette = theme.extended_palette();
 
@@ -104,7 +88,7 @@ impl<Message> canvas::Program<Message> for Clock {
             let radius = frame.width().min(frame.height()) / 2.0;
 
             let background = Path::circle(center, radius);
-            frame.fill(&background, palette.primary.weak.color);
+            frame.fill(&background, palette.secondary.strong.color);
 
             let short_hand =
                 Path::line(Point::ORIGIN, Point::new(0.0, -0.5 * radius));
@@ -117,7 +101,7 @@ impl<Message> canvas::Program<Message> for Clock {
             let thin_stroke = || -> Stroke {
                 Stroke {
                     width,
-                    style: stroke::Style::Solid(palette.primary.weak.text),
+                    style: stroke::Style::Solid(palette.secondary.strong.text),
                     line_cap: LineCap::Round,
                     ..Stroke::default()
                 }
@@ -126,16 +110,21 @@ impl<Message> canvas::Program<Message> for Clock {
             let wide_stroke = || -> Stroke {
                 Stroke {
                     width: width * 3.0,
-                    style: stroke::Style::Solid(palette.primary.weak.text),
+                    style: stroke::Style::Solid(palette.secondary.strong.text),
                     line_cap: LineCap::Round,
                     ..Stroke::default()
                 }
             };
 
             frame.translate(Vector::new(center.x, center.y));
+            let minutes_portion =
+                Radians::from(hand_rotation(self.now.minute(), 60)) / 12.0;
+            let hour_hand_angle =
+                Radians::from(hand_rotation(self.now.hour(), 12))
+                    + minutes_portion;
 
             frame.with_save(|frame| {
-                frame.rotate(hand_rotation(self.now.hour(), 12));
+                frame.rotate(hour_hand_angle);
                 frame.stroke(&short_hand, wide_stroke());
             });
 
@@ -145,17 +134,76 @@ impl<Message> canvas::Program<Message> for Clock {
             });
 
             frame.with_save(|frame| {
-                frame.rotate(hand_rotation(self.now.second(), 60));
+                let rotation = hand_rotation(self.now.second(), 60);
+
+                frame.rotate(rotation);
                 frame.stroke(&long_hand, thin_stroke());
+
+                let rotate_factor = if rotation < 180.0 { 1.0 } else { -1.0 };
+
+                frame.rotate(Degrees(-90.0 * rotate_factor));
+                frame.fill_text(canvas::Text {
+                    content: theme.to_string(),
+                    size: (radius / 15.0).into(),
+                    position: Point::new(
+                        (0.78 * radius) * rotate_factor,
+                        -width * 2.0,
+                    ),
+                    color: palette.secondary.strong.text,
+                    horizontal_alignment: if rotate_factor > 0.0 {
+                        alignment::Horizontal::Right
+                    } else {
+                        alignment::Horizontal::Left
+                    },
+                    vertical_alignment: alignment::Vertical::Bottom,
+                    font: Font::MONOSPACE,
+                    ..canvas::Text::default()
+                });
             });
+
+            // Draw clock numbers
+            for hour in 1..=12 {
+                let angle = Radians::from(hand_rotation(hour, 12))
+                    - Radians::from(Degrees(90.0));
+                let x = radius * angle.0.cos();
+                let y = radius * angle.0.sin();
+
+                frame.fill_text(canvas::Text {
+                    content: format!("{}", hour),
+                    size: (radius / 5.0).into(),
+                    position: Point::new(x * 0.82, y * 0.82),
+                    color: palette.secondary.strong.text,
+                    horizontal_alignment: alignment::Horizontal::Center,
+                    vertical_alignment: alignment::Vertical::Center,
+                    font: Font::MONOSPACE,
+                    ..canvas::Text::default()
+                });
+            }
+
+            // Draw ticks
+            for tick in 0..60 {
+                let angle = hand_rotation(tick, 60);
+                let width = if tick % 5 == 0 { 3.0 } else { 1.0 };
+
+                frame.with_save(|frame| {
+                    frame.rotate(angle);
+                    frame.fill(
+                        &Path::rectangle(
+                            Point::new(0.0, radius - 15.0),
+                            Size::new(width, 7.0),
+                        ),
+                        palette.secondary.strong.text,
+                    );
+                });
+            }
         });
 
         vec![clock]
     }
 }
 
-fn hand_rotation(n: u8, total: u8) -> f32 {
+fn hand_rotation(n: u32, total: u32) -> Degrees {
     let turns = n as f32 / total as f32;
 
-    2.0 * std::f32::consts::PI * turns
+    Degrees(360.0 * turns)
 }

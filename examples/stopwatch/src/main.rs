@@ -1,27 +1,30 @@
-use iced::alignment;
-use iced::executor;
 use iced::keyboard;
 use iced::time;
-use iced::widget::{button, column, container, row, text};
-use iced::{
-    Alignment, Application, Command, Element, Length, Settings, Subscription,
-    Theme,
-};
+use iced::widget::{button, center, column, row, text};
+use iced::{Center, Element, Subscription, Theme};
 
 use std::time::{Duration, Instant};
 
 pub fn main() -> iced::Result {
-    Stopwatch::run(Settings::default())
+    iced::application("Stopwatch - Iced", Stopwatch::update, Stopwatch::view)
+        .subscription(Stopwatch::subscription)
+        .theme(Stopwatch::theme)
+        .run()
 }
 
+#[derive(Default)]
 struct Stopwatch {
     duration: Duration,
     state: State,
 }
 
+#[derive(Default)]
 enum State {
+    #[default]
     Idle,
-    Ticking { last_tick: Instant },
+    Ticking {
+        last_tick: Instant,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -31,27 +34,8 @@ enum Message {
     Tick(Instant),
 }
 
-impl Application for Stopwatch {
-    type Message = Message;
-    type Theme = Theme;
-    type Executor = executor::Default;
-    type Flags = ();
-
-    fn new(_flags: ()) -> (Stopwatch, Command<Message>) {
-        (
-            Stopwatch {
-                duration: Duration::default(),
-                state: State::Idle,
-            },
-            Command::none(),
-        )
-    }
-
-    fn title(&self) -> String {
-        String::from("Stopwatch - Iced")
-    }
-
-    fn update(&mut self, message: Message) -> Command<Message> {
+impl Stopwatch {
+    fn update(&mut self, message: Message) {
         match message {
             Message::Toggle => match self.state {
                 State::Idle => {
@@ -73,8 +57,6 @@ impl Application for Stopwatch {
                 self.duration = Duration::default();
             }
         }
-
-        Command::none()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -109,22 +91,17 @@ impl Application for Stopwatch {
 
         let seconds = self.duration.as_secs();
 
-        let duration = text(format!(
+        let duration = text!(
             "{:0>2}:{:0>2}:{:0>2}.{:0>2}",
             seconds / HOUR,
             (seconds % HOUR) / MINUTE,
             seconds % MINUTE,
             self.duration.subsec_millis() / 10,
-        ))
+        )
         .size(40);
 
-        let button = |label| {
-            button(
-                text(label).horizontal_alignment(alignment::Horizontal::Center),
-            )
-            .padding(10)
-            .width(80)
-        };
+        let button =
+            |label| button(text(label).align_x(Center)).padding(10).width(80);
 
         let toggle_button = {
             let label = match self.state {
@@ -141,16 +118,9 @@ impl Application for Stopwatch {
 
         let controls = row![toggle_button, reset_button].spacing(20);
 
-        let content = column![duration, controls]
-            .align_items(Alignment::Center)
-            .spacing(20);
+        let content = column![duration, controls].align_x(Center).spacing(20);
 
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y()
-            .into()
+        center(content).into()
     }
 
     fn theme(&self) -> Theme {

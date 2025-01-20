@@ -6,14 +6,15 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
     steps:
-    - uses: hecrj/setup-rust-action@v1
+    - uses: hecrj/setup-rust-action@v2
       with:
-        rust-version: nightly-2023-12-11
+        rust-version: nightly
     - uses: actions/checkout@v2
     - name: Generate documentation
       run: |
         RUSTDOCFLAGS="--cfg docsrs" \
           cargo doc --no-deps --all-features \
+          -p futures-core \
           -p iced_core \
           -p iced_highlighter \
           -p iced_futures \
@@ -27,6 +28,8 @@ jobs:
           -p iced
     - name: Write CNAME file
       run: echo 'docs.iced.rs' > ./target/doc/CNAME
+    - name: Copy redirect file as index.html
+      run: cp docs/redirect.html target/doc/index.html
     - name: Publish documentation
       if: github.ref == 'refs/heads/master'
       uses: peaceiris/actions-gh-pages@v3

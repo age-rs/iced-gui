@@ -19,7 +19,7 @@ use crate::overlay;
 /// The [`integration`] example uses a [`UserInterface`] to integrate Iced in an
 /// existing graphical application.
 ///
-/// [`integration`]: https://github.com/iced-rs/iced/tree/0.12/examples/integration
+/// [`integration`]: https://github.com/iced-rs/iced/tree/0.13/examples/integration
 #[allow(missing_debug_implementations)]
 pub struct UserInterface<'a, Message, Theme, Renderer> {
     root: Element<'a, Message, Theme, Renderer>,
@@ -45,7 +45,7 @@ where
     ///
     /// ```no_run
     /// # mod iced_wgpu {
-    /// #     pub use iced_runtime::core::renderer::Null as Renderer;
+    /// #     pub type Renderer = ();
     /// # }
     /// #
     /// # pub struct Counter;
@@ -62,7 +62,7 @@ where
     /// // Initialization
     /// let mut counter = Counter::new();
     /// let mut cache = user_interface::Cache::new();
-    /// let mut renderer = Renderer::new();
+    /// let mut renderer = Renderer::default();
     /// let mut window_size = Size::new(1024.0, 768.0);
     ///
     /// // Application loop
@@ -121,7 +121,7 @@ where
     ///
     /// ```no_run
     /// # mod iced_wgpu {
-    /// #     pub use iced_runtime::core::renderer::Null as Renderer;
+    /// #     pub type Renderer = ();
     /// # }
     /// #
     /// # pub struct Counter;
@@ -139,7 +139,7 @@ where
     ///
     /// let mut counter = Counter::new();
     /// let mut cache = user_interface::Cache::new();
-    /// let mut renderer = Renderer::new();
+    /// let mut renderer = Renderer::default();
     /// let mut window_size = Size::new(1024.0, 768.0);
     /// let mut cursor = mouse::Cursor::default();
     /// let mut clipboard = clipboard::Null;
@@ -210,7 +210,7 @@ where
             for event in events.iter().cloned() {
                 let mut shell = Shell::new(messages);
 
-                let event_status = overlay.on_event(
+                overlay.update(
                     event,
                     Layout::new(&layout),
                     cursor,
@@ -219,7 +219,7 @@ where
                     &mut shell,
                 );
 
-                event_statuses.push(event_status);
+                event_statuses.push(shell.event_status());
 
                 match (redraw_request, shell.redraw_request()) {
                     (None, Some(at)) => {
@@ -308,7 +308,7 @@ where
 
                 let mut shell = Shell::new(messages);
 
-                let event_status = self.root.as_widget_mut().on_event(
+                self.root.as_widget_mut().update(
                     &mut self.state,
                     event,
                     Layout::new(&self.base),
@@ -319,7 +319,7 @@ where
                     &viewport,
                 );
 
-                if matches!(event_status, event::Status::Captured) {
+                if shell.event_status() == event::Status::Captured {
                     self.overlay = None;
                 }
 
@@ -347,7 +347,7 @@ where
                     outdated = true;
                 }
 
-                event_status.merge(overlay_status)
+                shell.event_status().merge(overlay_status)
             })
             .collect();
 
@@ -374,7 +374,7 @@ where
     ///
     /// ```no_run
     /// # mod iced_wgpu {
-    /// #     pub use iced_runtime::core::renderer::Null as Renderer;
+    /// #     pub type Renderer = ();
     /// #     pub type Theme = ();
     /// # }
     /// #
@@ -394,7 +394,7 @@ where
     ///
     /// let mut counter = Counter::new();
     /// let mut cache = user_interface::Cache::new();
-    /// let mut renderer = Renderer::new();
+    /// let mut renderer = Renderer::default();
     /// let mut window_size = Size::new(1024.0, 768.0);
     /// let mut cursor = mouse::Cursor::default();
     /// let mut clipboard = clipboard::Null;
@@ -566,7 +566,7 @@ where
     pub fn operate(
         &mut self,
         renderer: &Renderer,
-        operation: &mut dyn widget::Operation<Message>,
+        operation: &mut dyn widget::Operation,
     ) {
         self.root.as_widget().operate(
             &mut self.state,

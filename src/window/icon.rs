@@ -13,7 +13,7 @@ use std::path::Path;
 /// This will return an error in case the file is missing at run-time. You may prefer [`from_file_data`] instead.
 #[cfg(feature = "image")]
 pub fn from_file<P: AsRef<Path>>(icon_path: P) -> Result<Icon, Error> {
-    let icon = image::io::Reader::open(icon_path)?.decode()?.to_rgba8();
+    let icon = image::ImageReader::open(icon_path)?.decode()?.to_rgba8();
 
     Ok(icon::from_rgba(icon.to_vec(), icon.width(), icon.height())?)
 }
@@ -27,7 +27,7 @@ pub fn from_file_data(
     data: &[u8],
     explicit_format: Option<image::ImageFormat>,
 ) -> Result<Icon, Error> {
-    let mut icon = image::io::Reader::new(std::io::Cursor::new(data));
+    let mut icon = image::ImageReader::new(std::io::Cursor::new(data));
 
     let icon_with_format = match explicit_format {
         Some(format) => {
@@ -54,7 +54,7 @@ pub enum Error {
     InvalidError(#[from] icon::Error),
 
     /// The underlying OS failed to create the icon.
-    #[error("The underlying OS failted to create the window icon: {0}")]
+    #[error("The underlying OS failed to create the window icon: {0}")]
     OsError(#[from] io::Error),
 
     /// The `image` crate reported an error.

@@ -3,6 +3,7 @@
 #[allow(missing_docs)]
 pub enum Interaction {
     #[default]
+    None,
     Idle,
     Pointer,
     Grab,
@@ -12,6 +13,13 @@ pub enum Interaction {
     Grabbing,
     ResizingHorizontally,
     ResizingVertically,
+    ResizingDiagonallyUp,
+    ResizingDiagonallyDown,
     NotAllowed,
     ZoomIn,
+    ZoomOut,
+    Cell,
+    Move,
+    Copy,
+    Help,
 }

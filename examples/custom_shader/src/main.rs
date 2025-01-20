@@ -2,18 +2,20 @@ mod scene;
 
 use scene::Scene;
 
-use iced::executor;
 use iced::time::Instant;
-use iced::widget::shader::wgpu;
-use iced::widget::{checkbox, column, container, row, shader, slider, text};
+use iced::wgpu;
+use iced::widget::{center, checkbox, column, row, shader, slider, text};
 use iced::window;
-use iced::{
-    Alignment, Application, Color, Command, Element, Length, Subscription,
-    Theme,
-};
+use iced::{Center, Color, Element, Fill, Subscription};
 
 fn main() -> iced::Result {
-    IcedCubes::run(iced::Settings::default())
+    iced::application(
+        "Custom Shader - Iced",
+        IcedCubes::update,
+        IcedCubes::view,
+    )
+    .subscription(IcedCubes::subscription)
+    .run()
 }
 
 struct IcedCubes {
@@ -30,27 +32,15 @@ enum Message {
     LightColorChanged(Color),
 }
 
-impl Application for IcedCubes {
-    type Executor = executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = ();
-
-    fn new(_flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        (
-            Self {
-                start: Instant::now(),
-                scene: Scene::new(),
-            },
-            Command::none(),
-        )
+impl IcedCubes {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+            scene: Scene::new(),
+        }
     }
 
-    fn title(&self) -> String {
-        "Iced Cubes".to_string()
-    }
-
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+    fn update(&mut self, message: Message) {
         match message {
             Message::CubeAmountChanged(amount) => {
                 self.scene.change_amount(amount);
@@ -68,11 +58,9 @@ impl Application for IcedCubes {
                 self.scene.light_color = color;
             }
         }
-
-        Command::none()
     }
 
-    fn view(&self) -> Element<'_, Self::Message> {
+    fn view(&self) -> Element<'_, Message> {
         let top_controls = row![
             control(
                 "Amount",
@@ -134,21 +122,21 @@ impl Application for IcedCubes {
         let controls = column![top_controls, bottom_controls,]
             .spacing(10)
             .padding(20)
-            .align_items(Alignment::Center);
+            .align_x(Center);
 
-        let shader =
-            shader(&self.scene).width(Length::Fill).height(Length::Fill);
+        let shader = shader(&self.scene).width(Fill).height(Fill);
 
-        container(column![shader, controls].align_items(Alignment::Center))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y()
-            .into()
+        center(column![shader, controls].align_x(Center)).into()
     }
 
-    fn subscription(&self) -> Subscription<Self::Message> {
+    fn subscription(&self) -> Subscription<Message> {
         window::frames().map(Message::Tick)
+    }
+}
+
+impl Default for IcedCubes {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -1,10 +1,32 @@
-//! Provide progress feedback to your users.
+//! Progress bars visualize the progression of an extended computer operation, such as a download, file transfer, or installation.
+//!
+//! # Example
+//! ```no_run
+//! # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+//! # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+//! #
+//! use iced::widget::progress_bar;
+//!
+//! struct State {
+//!    progress: f32,
+//! }
+//!
+//! enum Message {
+//!     // ...
+//! }
+//!
+//! fn view(state: &State) -> Element<'_, Message> {
+//!     progress_bar(0.0..=100.0, state.progress).into()
+//! }
+//! ```
+use crate::core::border::{self, Border};
 use crate::core::layout;
 use crate::core::mouse;
 use crate::core::renderer;
 use crate::core::widget::Tree;
 use crate::core::{
-    Background, Border, Element, Layout, Length, Rectangle, Size, Theme, Widget,
+    self, Background, Color, Element, Layout, Length, Rectangle, Size, Theme,
+    Widget,
 };
 
 use std::ops::RangeInclusive;
@@ -13,24 +35,39 @@ use std::ops::RangeInclusive;
 ///
 /// # Example
 /// ```no_run
-/// # type ProgressBar = iced_widget::ProgressBar;
+/// # mod iced { pub mod widget { pub use iced_widget::*; } pub use iced_widget::Renderer; pub use iced_widget::core::*; }
+/// # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
 /// #
-/// let value = 50.0;
+/// use iced::widget::progress_bar;
 ///
-/// ProgressBar::new(0.0..=100.0, value);
+/// struct State {
+///    progress: f32,
+/// }
+///
+/// enum Message {
+///     // ...
+/// }
+///
+/// fn view(state: &State) -> Element<'_, Message> {
+///     progress_bar(0.0..=100.0, state.progress).into()
+/// }
 /// ```
-///
-/// ![Progress bar drawn with `iced_wgpu`](https://user-images.githubusercontent.com/18618951/71662391-a316c200-2d51-11ea-9cef-52758cab85e3.png)
 #[allow(missing_debug_implementations)]
-pub struct ProgressBar<Theme = crate::Theme> {
+pub struct ProgressBar<'a, Theme = crate::Theme>
+where
+    Theme: Catalog,
+{
     range: RangeInclusive<f32>,
     value: f32,
     width: Length,
     height: Option<Length>,
-    style: Style<Theme>,
+    class: Theme::Class<'a>,
 }
 
-impl<Theme> ProgressBar<Theme> {
+impl<'a, Theme> ProgressBar<'a, Theme>
+where
+    Theme: Catalog,
+{
     /// The default height of a [`ProgressBar`].
     pub const DEFAULT_HEIGHT: f32 = 30.0;
 
@@ -39,16 +76,13 @@ impl<Theme> ProgressBar<Theme> {
     /// It expects:
     ///   * an inclusive range of possible values
     ///   * the current value of the [`ProgressBar`]
-    pub fn new(range: RangeInclusive<f32>, value: f32) -> Self
-    where
-        Theme: DefaultStyle,
-    {
+    pub fn new(range: RangeInclusive<f32>, value: f32) -> Self {
         ProgressBar {
             value: value.clamp(*range.start(), *range.end()),
             range,
             width: Length::Fill,
             height: None,
-            style: Theme::default_style(),
+            class: Theme::default(),
         }
     }
 
@@ -65,16 +99,29 @@ impl<Theme> ProgressBar<Theme> {
     }
 
     /// Sets the style of the [`ProgressBar`].
-    pub fn style(mut self, style: fn(&Theme) -> Appearance) -> Self {
-        self.style = style.into();
+    #[must_use]
+    pub fn style(mut self, style: impl Fn(&Theme) -> Style + 'a) -> Self
+    where
+        Theme::Class<'a>: From<StyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets the style class of the [`ProgressBar`].
+    #[cfg(feature = "advanced")]
+    #[must_use]
+    pub fn class(mut self, class: impl Into<Theme::Class<'a>>) -> Self {
+        self.class = class.into();
         self
     }
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for ProgressBar<Theme>
+    for ProgressBar<'_, Theme>
 where
-    Renderer: crate::core::Renderer,
+    Theme: Catalog,
+    Renderer: core::Renderer,
 {
     fn size(&self) -> Size<Length> {
         Size {
@@ -116,15 +163,15 @@ where
                 / (range_end - range_start)
         };
 
-        let appearance = (self.style)(theme);
+        let style = theme.style(&self.class);
 
         renderer.fill_quad(
             renderer::Quad {
                 bounds: Rectangle { ..bounds },
-                border: appearance.border,
+                border: style.border,
                 ..renderer::Quad::default()
             },
-            appearance.background,
+            style.background,
         );
 
         if active_progress_width > 0.0 {
@@ -134,32 +181,35 @@ where
                         width: active_progress_width,
                         ..bounds
                     },
-                    border: Border::rounded(appearance.border.radius),
+                    border: Border {
+                        color: Color::TRANSPARENT,
+                        ..style.border
+                    },
                     ..renderer::Quad::default()
                 },
-                appearance.bar,
+                style.bar,
             );
         }
     }
 }
 
-impl<'a, Message, Theme, Renderer> From<ProgressBar<Theme>>
+impl<'a, Message, Theme, Renderer> From<ProgressBar<'a, Theme>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
-    Theme: 'a,
-    Renderer: 'a + crate::core::Renderer,
+    Theme: 'a + Catalog,
+    Renderer: 'a + core::Renderer,
 {
     fn from(
-        progress_bar: ProgressBar<Theme>,
+        progress_bar: ProgressBar<'a, Theme>,
     ) -> Element<'a, Message, Theme, Renderer> {
         Element::new(progress_bar)
     }
 }
 
 /// The appearance of a progress bar.
-#[derive(Debug, Clone, Copy)]
-pub struct Appearance {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Style {
     /// The [`Background`] of the progress bar.
     pub background: Background,
     /// The [`Background`] of the bar of the progress bar.
@@ -168,29 +218,37 @@ pub struct Appearance {
     pub border: Border,
 }
 
-/// The style of a [`ProgressBar`].
-pub type Style<Theme> = fn(&Theme) -> Appearance;
+/// The theme catalog of a [`ProgressBar`].
+pub trait Catalog: Sized {
+    /// The item class of the [`Catalog`].
+    type Class<'a>;
 
-/// The default style of a [`ProgressBar`].
-pub trait DefaultStyle {
-    /// Returns the default style of a [`ProgressBar`].
-    fn default_style() -> Style<Self>;
+    /// The default class produced by the [`Catalog`].
+    fn default<'a>() -> Self::Class<'a>;
+
+    /// The [`Style`] of a class with the given status.
+    fn style(&self, class: &Self::Class<'_>) -> Style;
 }
 
-impl DefaultStyle for Theme {
-    fn default_style() -> Style<Self> {
-        primary
+/// A styling function for a [`ProgressBar`].
+///
+/// This is just a boxed closure: `Fn(&Theme, Status) -> Style`.
+pub type StyleFn<'a, Theme> = Box<dyn Fn(&Theme) -> Style + 'a>;
+
+impl Catalog for Theme {
+    type Class<'a> = StyleFn<'a, Self>;
+
+    fn default<'a>() -> Self::Class<'a> {
+        Box::new(primary)
     }
-}
 
-impl DefaultStyle for Appearance {
-    fn default_style() -> Style<Self> {
-        |appearance| *appearance
+    fn style(&self, class: &Self::Class<'_>) -> Style {
+        class(self)
     }
 }
 
 /// The primary style of a [`ProgressBar`].
-pub fn primary(theme: &Theme) -> Appearance {
+pub fn primary(theme: &Theme) -> Style {
     let palette = theme.extended_palette();
 
     styled(
@@ -200,7 +258,7 @@ pub fn primary(theme: &Theme) -> Appearance {
 }
 
 /// The secondary style of a [`ProgressBar`].
-pub fn secondary(theme: &Theme) -> Appearance {
+pub fn secondary(theme: &Theme) -> Style {
     let palette = theme.extended_palette();
 
     styled(
@@ -210,14 +268,14 @@ pub fn secondary(theme: &Theme) -> Appearance {
 }
 
 /// The success style of a [`ProgressBar`].
-pub fn success(theme: &Theme) -> Appearance {
+pub fn success(theme: &Theme) -> Style {
     let palette = theme.extended_palette();
 
     styled(palette.background.strong.color, palette.success.base.color)
 }
 
 /// The danger style of a [`ProgressBar`].
-pub fn danger(theme: &Theme) -> Appearance {
+pub fn danger(theme: &Theme) -> Style {
     let palette = theme.extended_palette();
 
     styled(palette.background.strong.color, palette.danger.base.color)
@@ -226,10 +284,10 @@ pub fn danger(theme: &Theme) -> Appearance {
 fn styled(
     background: impl Into<Background>,
     bar: impl Into<Background>,
-) -> Appearance {
-    Appearance {
+) -> Style {
+    Style {
         background: background.into(),
         bar: bar.into(),
-        border: Border::rounded(2),
+        border: border::rounded(2),
     }
 }

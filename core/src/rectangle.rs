@@ -1,6 +1,6 @@
-use crate::{Point, Size, Vector};
+use crate::{Padding, Point, Radians, Size, Vector};
 
-/// A rectangle.
+/// An axis-aligned rectangle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Rectangle<T = f32> {
     /// X coordinate of the top-left corner.
@@ -16,10 +16,29 @@ pub struct Rectangle<T = f32> {
     pub height: T,
 }
 
+impl<T> Rectangle<T>
+where
+    T: Default,
+{
+    /// Creates a new [`Rectangle`] with its top-left corner at the origin
+    /// and with the provided [`Size`].
+    pub fn with_size(size: Size<T>) -> Self {
+        Self {
+            x: T::default(),
+            y: T::default(),
+            width: size.width,
+            height: size.height,
+        }
+    }
+}
+
 impl Rectangle<f32> {
+    /// A rectangle starting at [`Point::ORIGIN`] with infinite width and height.
+    pub const INFINITE: Self = Self::new(Point::ORIGIN, Size::INFINITY);
+
     /// Creates a new [`Rectangle`] with its top-left corner in the given
     /// [`Point`] and with the provided [`Size`].
-    pub fn new(top_left: Point, size: Size) -> Self {
+    pub const fn new(top_left: Point, size: Size) -> Self {
         Self {
             x: top_left.x,
             y: top_left.y,
@@ -28,15 +47,60 @@ impl Rectangle<f32> {
         }
     }
 
-    /// Creates a new [`Rectangle`] with its top-left corner at the origin
-    /// and with the provided [`Size`].
-    pub fn with_size(size: Size) -> Self {
+    /// Creates a new square [`Rectangle`] with the center at the origin and
+    /// with the given radius.
+    pub fn with_radius(radius: f32) -> Self {
         Self {
-            x: 0.0,
-            y: 0.0,
-            width: size.width,
-            height: size.height,
+            x: -radius,
+            y: -radius,
+            width: radius * 2.0,
+            height: radius * 2.0,
         }
+    }
+
+    /// Creates a new axis-aligned [`Rectangle`] from the given vertices; returning the
+    /// rotation in [`Radians`] that must be applied to the axis-aligned [`Rectangle`]
+    /// to obtain the desired result.
+    pub fn with_vertices(
+        top_left: Point,
+        top_right: Point,
+        bottom_left: Point,
+    ) -> (Rectangle, Radians) {
+        let width = (top_right.x - top_left.x).hypot(top_right.y - top_left.y);
+
+        let height =
+            (bottom_left.x - top_left.x).hypot(bottom_left.y - top_left.y);
+
+        let rotation =
+            (top_right.y - top_left.y).atan2(top_right.x - top_left.x);
+
+        let rotation = if rotation < 0.0 {
+            2.0 * std::f32::consts::PI + rotation
+        } else {
+            rotation
+        };
+
+        let position = {
+            let center = Point::new(
+                (top_right.x + bottom_left.x) / 2.0,
+                (top_right.y + bottom_left.y) / 2.0,
+            );
+
+            let rotation = -rotation - std::f32::consts::PI * 2.0;
+
+            Point::new(
+                center.x + (top_left.x - center.x) * rotation.cos()
+                    - (top_left.y - center.y) * rotation.sin(),
+                center.y
+                    + (top_left.x - center.x) * rotation.sin()
+                    + (top_left.y - center.y) * rotation.cos(),
+            )
+        };
+
+        (
+            Rectangle::new(position, Size::new(width, height)),
+            Radians(rotation),
+        )
     }
 
     /// Returns the [`Point`] at the center of the [`Rectangle`].
@@ -139,23 +203,56 @@ impl Rectangle<f32> {
     }
 
     /// Snaps the [`Rectangle`] to __unsigned__ integer coordinates.
-    pub fn snap(self) -> Rectangle<u32> {
-        Rectangle {
+    pub fn snap(self) -> Option<Rectangle<u32>> {
+        let width = self.width as u32;
+        let height = self.height as u32;
+
+        if width < 1 || height < 1 {
+            return None;
+        }
+
+        Some(Rectangle {
             x: self.x as u32,
             y: self.y as u32,
-            width: self.width as u32,
-            height: self.height as u32,
-        }
+            width,
+            height,
+        })
     }
 
     /// Expands the [`Rectangle`] a given amount.
-    pub fn expand(self, amount: f32) -> Self {
+    pub fn expand(self, padding: impl Into<Padding>) -> Self {
+        let padding = padding.into();
+
         Self {
-            x: self.x - amount,
-            y: self.y - amount,
-            width: self.width + amount * 2.0,
-            height: self.height + amount * 2.0,
+            x: self.x - padding.left,
+            y: self.y - padding.top,
+            width: self.width + padding.horizontal(),
+            height: self.height + padding.vertical(),
         }
+    }
+
+    /// Shrinks the [`Rectangle`] a given amount.
+    pub fn shrink(self, padding: impl Into<Padding>) -> Self {
+        let padding = padding.into();
+
+        Self {
+            x: self.x + padding.left,
+            y: self.y + padding.top,
+            width: self.width - padding.horizontal(),
+            height: self.height - padding.vertical(),
+        }
+    }
+
+    /// Rotates the [`Rectangle`] and returns the smallest [`Rectangle`]
+    /// containing it.
+    pub fn rotate(self, rotation: Radians) -> Self {
+        let size = self.size().rotate(rotation);
+        let position = Point::new(
+            self.center_x() - size.width / 2.0,
+            self.center_y() - size.height / 2.0,
+        );
+
+        Self::new(position, size)
     }
 }
 
@@ -209,6 +306,22 @@ where
             x: self.x - translation.x,
             y: self.y - translation.y,
             ..self
+        }
+    }
+}
+
+impl<T> std::ops::Mul<Vector<T>> for Rectangle<T>
+where
+    T: std::ops::Mul<Output = T> + Copy,
+{
+    type Output = Rectangle<T>;
+
+    fn mul(self, scale: Vector<T>) -> Self {
+        Rectangle {
+            x: self.x * scale.x,
+            y: self.y * scale.y,
+            width: self.width * scale.x,
+            height: self.height * scale.y,
         }
     }
 }

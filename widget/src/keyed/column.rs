@@ -1,5 +1,4 @@
-//! Distribute content vertically.
-use crate::core::event::{self, Event};
+//! Keyed columns distribute content vertically while keeping continuity.
 use crate::core::layout;
 use crate::core::mouse;
 use crate::core::overlay;
@@ -7,11 +6,29 @@ use crate::core::renderer;
 use crate::core::widget::tree::{self, Tree};
 use crate::core::widget::Operation;
 use crate::core::{
-    Alignment, Clipboard, Element, Layout, Length, Padding, Pixels, Rectangle,
-    Shell, Size, Vector, Widget,
+    Alignment, Clipboard, Element, Event, Layout, Length, Padding, Pixels,
+    Rectangle, Shell, Size, Vector, Widget,
 };
 
-/// A container that distributes its contents vertically.
+/// A container that distributes its contents vertically while keeping continuity.
+///
+/// # Example
+/// ```no_run
+/// # mod iced { pub mod widget { pub use iced_widget::*; } }
+/// # pub type State = ();
+/// # pub type Element<'a, Message> = iced_widget::core::Element<'a, Message, iced_widget::Theme, iced_widget::Renderer>;
+/// use iced::widget::{keyed_column, text};
+///
+/// enum Message {
+///     // ...
+/// }
+///
+/// fn view(state: &State) -> Element<'_, Message> {
+///     keyed_column((0..=100).map(|i| {
+///         (i, text!("Item {i}").into())
+///     })).into()
+/// }
+/// ```
 #[allow(missing_debug_implementations)]
 pub struct Column<
     'a,
@@ -40,16 +57,38 @@ where
 {
     /// Creates an empty [`Column`].
     pub fn new() -> Self {
-        Column {
+        Self::from_vecs(Vec::new(), Vec::new())
+    }
+
+    /// Creates a [`Column`] from already allocated [`Vec`]s.
+    ///
+    /// Keep in mind that the [`Column`] will not inspect the [`Vec`]s, which means
+    /// it won't automatically adapt to the sizing strategy of its contents.
+    ///
+    /// If any of the children have a [`Length::Fill`] strategy, you will need to
+    /// call [`Column::width`] or [`Column::height`] accordingly.
+    pub fn from_vecs(
+        keys: Vec<Key>,
+        children: Vec<Element<'a, Message, Theme, Renderer>>,
+    ) -> Self {
+        Self {
             spacing: 0.0,
             padding: Padding::ZERO,
             width: Length::Shrink,
             height: Length::Shrink,
             max_width: f32::INFINITY,
             align_items: Alignment::Start,
-            keys: Vec::new(),
-            children: Vec::new(),
+            keys,
+            children,
         }
+    }
+
+    /// Creates a [`Column`] with the given capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::from_vecs(
+            Vec::with_capacity(capacity),
+            Vec::with_capacity(capacity),
+        )
     }
 
     /// Creates a [`Column`] with the given elements.
@@ -58,9 +97,9 @@ where
             Item = (Key, Element<'a, Message, Theme, Renderer>),
         >,
     ) -> Self {
-        children
-            .into_iter()
-            .fold(Self::new(), |column, (key, child)| column.push(key, child))
+        let iterator = children.into_iter();
+
+        Self::with_capacity(iterator.size_hint().0).extend(iterator)
     }
 
     /// Sets the vertical spacing _between_ elements.
@@ -132,9 +171,21 @@ where
             self
         }
     }
+
+    /// Extends the [`Column`] with the given children.
+    pub fn extend(
+        self,
+        children: impl IntoIterator<
+            Item = (Key, Element<'a, Message, Theme, Renderer>),
+        >,
+    ) -> Self {
+        children
+            .into_iter()
+            .fold(self, |column, (key, child)| column.push(key, child))
+    }
 }
 
-impl<'a, Key, Message, Renderer> Default for Column<'a, Key, Message, Renderer>
+impl<Key, Message, Renderer> Default for Column<'_, Key, Message, Renderer>
 where
     Key: Copy + PartialEq,
     Renderer: crate::core::Renderer,
@@ -151,8 +202,8 @@ where
     keys: Vec<Key>,
 }
 
-impl<'a, Key, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for Column<'a, Key, Message, Theme, Renderer>
+impl<Key, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Column<'_, Key, Message, Theme, Renderer>
 where
     Renderer: crate::core::Renderer,
     Key: Copy + PartialEq + 'static,
@@ -190,7 +241,7 @@ where
         );
 
         if state.keys != self.keys {
-            state.keys = self.keys.clone();
+            state.keys.clone_from(&self.keys);
         }
     }
 
@@ -231,7 +282,7 @@ where
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
-        operation: &mut dyn Operation<Message>,
+        operation: &mut dyn Operation,
     ) {
         operation.container(None, layout.bounds(), &mut |operation| {
             self.children
@@ -246,7 +297,7 @@ where
         });
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
         event: Event,
@@ -256,24 +307,24 @@ where
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> event::Status {
-        self.children
+    ) {
+        for ((child, state), layout) in self
+            .children
             .iter_mut()
             .zip(&mut tree.children)
             .zip(layout.children())
-            .map(|((child, state), layout)| {
-                child.as_widget_mut().on_event(
-                    state,
-                    event.clone(),
-                    layout,
-                    cursor,
-                    renderer,
-                    clipboard,
-                    shell,
-                    viewport,
-                )
-            })
-            .fold(event::Status::Ignored, event::Status::merge)
+        {
+            child.as_widget_mut().update(
+                state,
+                event.clone(),
+                layout,
+                cursor,
+                renderer,
+                clipboard,
+                shell,
+                viewport,
+            );
+        }
     }
 
     fn mouse_interaction(

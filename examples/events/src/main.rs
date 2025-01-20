@@ -1,21 +1,13 @@
-use iced::alignment;
 use iced::event::{self, Event};
-use iced::executor;
-use iced::widget::{button, checkbox, container, text, Column};
+use iced::widget::{button, center, checkbox, text, Column};
 use iced::window;
-use iced::{
-    Alignment, Application, Command, Element, Length, Settings, Subscription,
-    Theme,
-};
+use iced::{Center, Element, Fill, Subscription, Task};
 
 pub fn main() -> iced::Result {
-    Events::run(Settings {
-        window: window::Settings {
-            exit_on_close_request: false,
-            ..window::Settings::default()
-        },
-        ..Settings::default()
-    })
+    iced::application("Events - Iced", Events::update, Events::view)
+        .subscription(Events::subscription)
+        .exit_on_close_request(false)
+        .run()
 }
 
 #[derive(Debug, Default)]
@@ -31,21 +23,8 @@ enum Message {
     Exit,
 }
 
-impl Application for Events {
-    type Message = Message;
-    type Theme = Theme;
-    type Executor = executor::Default;
-    type Flags = ();
-
-    fn new(_flags: ()) -> (Events, Command<Message>) {
-        (Events::default(), Command::none())
-    }
-
-    fn title(&self) -> String {
-        String::from("Events - Iced")
-    }
-
-    fn update(&mut self, message: Message) -> Command<Message> {
+impl Events {
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::EventOccurred(event) if self.enabled => {
                 self.last.push(event);
@@ -54,22 +33,21 @@ impl Application for Events {
                     let _ = self.last.remove(0);
                 }
 
-                Command::none()
+                Task::none()
             }
             Message::EventOccurred(event) => {
-                if let Event::Window(id, window::Event::CloseRequested) = event
-                {
-                    window::close(id)
+                if let Event::Window(window::Event::CloseRequested) = event {
+                    window::get_latest().and_then(window::close)
                 } else {
-                    Command::none()
+                    Task::none()
                 }
             }
             Message::Toggled(enabled) => {
                 self.enabled = enabled;
 
-                Command::none()
+                Task::none()
             }
-            Message::Exit => window::close(window::Id::MAIN),
+            Message::Exit => window::get_latest().and_then(window::close),
         }
     }
 
@@ -81,34 +59,25 @@ impl Application for Events {
         let events = Column::with_children(
             self.last
                 .iter()
-                .map(|event| text(format!("{event:?}")).size(40))
+                .map(|event| text!("{event:?}").size(40))
                 .map(Element::from),
         );
 
         let toggle = checkbox("Listen to runtime events", self.enabled)
             .on_toggle(Message::Toggled);
 
-        let exit = button(
-            text("Exit")
-                .width(Length::Fill)
-                .horizontal_alignment(alignment::Horizontal::Center),
-        )
-        .width(100)
-        .padding(10)
-        .on_press(Message::Exit);
+        let exit = button(text("Exit").width(Fill).align_x(Center))
+            .width(100)
+            .padding(10)
+            .on_press(Message::Exit);
 
         let content = Column::new()
-            .align_items(Alignment::Center)
+            .align_x(Center)
             .spacing(20)
             .push(events)
             .push(toggle)
             .push(exit);
 
-        container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x()
-            .center_y()
-            .into()
+        center(content).into()
     }
 }

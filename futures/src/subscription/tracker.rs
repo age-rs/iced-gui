@@ -1,12 +1,10 @@
-use crate::core::event::{self, Event};
-use crate::core::Hasher;
-use crate::subscription::Recipe;
+use crate::subscription::{Event, Hasher, Recipe};
 use crate::{BoxFuture, MaybeSend};
 
 use futures::channel::mpsc;
 use futures::sink::{Sink, SinkExt};
+use rustc_hash::FxHashMap;
 
-use std::collections::HashMap;
 use std::hash::Hasher as _;
 
 /// A registry of subscription streams.
@@ -18,20 +16,20 @@ use std::hash::Hasher as _;
 /// [`Subscription`]: crate::Subscription
 #[derive(Debug, Default)]
 pub struct Tracker {
-    subscriptions: HashMap<u64, Execution>,
+    subscriptions: FxHashMap<u64, Execution>,
 }
 
 #[derive(Debug)]
 pub struct Execution {
     _cancel: futures::channel::oneshot::Sender<()>,
-    listener: Option<futures::channel::mpsc::Sender<(Event, event::Status)>>,
+    listener: Option<futures::channel::mpsc::Sender<Event>>,
 }
 
 impl Tracker {
     /// Creates a new empty [`Tracker`].
     pub fn new() -> Self {
         Self {
-            subscriptions: HashMap::new(),
+            subscriptions: FxHashMap::default(),
         }
     }
 
@@ -44,10 +42,10 @@ impl Tracker {
     /// method:
     ///
     /// - If the provided [`Subscription`] contains a new [`Recipe`] that is
-    /// currently not being run, it will spawn a new stream and keep it alive.
+    ///   currently not being run, it will spawn a new stream and keep it alive.
     /// - On the other hand, if a [`Recipe`] is currently in execution and the
-    /// provided [`Subscription`] does not contain it anymore, then the
-    /// [`Tracker`] will close and drop the relevant stream.
+    ///   provided [`Subscription`] does not contain it anymore, then the
+    ///   [`Tracker`] will close and drop the relevant stream.
     ///
     /// It returns a list of futures that need to be spawned to materialize
     /// the [`Tracker`] changes.
@@ -140,12 +138,12 @@ impl Tracker {
     /// currently open.
     ///
     /// [`Recipe::stream`]: crate::subscription::Recipe::stream
-    pub fn broadcast(&mut self, event: Event, status: event::Status) {
+    pub fn broadcast(&mut self, event: Event) {
         self.subscriptions
             .values_mut()
             .filter_map(|connection| connection.listener.as_mut())
             .for_each(|listener| {
-                if let Err(error) = listener.try_send((event.clone(), status)) {
+                if let Err(error) = listener.try_send(event.clone()) {
                     log::warn!(
                         "Error sending event to subscription: {error:?}"
                     );

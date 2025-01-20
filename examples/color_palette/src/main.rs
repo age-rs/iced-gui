@@ -1,23 +1,25 @@
-use iced::alignment::{self, Alignment};
+use iced::alignment;
 use iced::mouse;
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path};
 use iced::widget::{column, row, text, Slider};
 use iced::{
-    Color, Element, Font, Length, Pixels, Point, Rectangle, Renderer, Sandbox,
-    Settings, Size, Vector,
+    Center, Color, Element, Fill, Font, Pixels, Point, Rectangle, Renderer,
+    Size, Vector,
 };
-use palette::{
-    self, convert::FromColor, rgb::Rgb, Darken, Hsl, Lighten, ShiftHue,
-};
+use palette::{convert::FromColor, rgb::Rgb, Darken, Hsl, Lighten, ShiftHue};
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 
 pub fn main() -> iced::Result {
-    ColorPalette::run(Settings {
-        antialiasing: true,
-        default_font: Font::MONOSPACE,
-        ..Settings::default()
-    })
+    iced::application(
+        "Color Palette - Iced",
+        ColorPalette::update,
+        ColorPalette::view,
+    )
+    .theme(ColorPalette::theme)
+    .default_font(Font::MONOSPACE)
+    .antialiasing(true)
+    .run()
 }
 
 #[derive(Default)]
@@ -41,17 +43,7 @@ pub enum Message {
     LchColorChanged(palette::Lch),
 }
 
-impl Sandbox for ColorPalette {
-    type Message = Message;
-
-    fn new() -> Self {
-        Self::default()
-    }
-
-    fn title(&self) -> String {
-        String::from("Color palette - Iced")
-    }
-
+impl ColorPalette {
     fn update(&mut self, message: Message) {
         let srgb = match message {
             Message::RgbColorChanged(rgb) => Rgb::from(rgb),
@@ -97,6 +89,7 @@ impl Sandbox for ColorPalette {
                 primary: *self.theme.lower.first().unwrap(),
                 text: *self.theme.higher.last().unwrap(),
                 success: *self.theme.lower.last().unwrap(),
+                warning: *self.theme.higher.last().unwrap(),
                 danger: *self.theme.higher.last().unwrap(),
             },
         )
@@ -158,10 +151,7 @@ impl Theme {
     }
 
     pub fn view(&self) -> Element<Message> {
-        Canvas::new(self)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+        Canvas::new(self).width(Fill).height(Fill).into()
     }
 
     fn draw(&self, frame: &mut Frame, text_color: Color) {
@@ -328,7 +318,7 @@ impl<C: ColorSpace + Copy> ColorPicker<C> {
             text(color.to_string()).width(185).size(12),
         ]
         .spacing(10)
-        .align_items(Alignment::Center)
+        .align_y(Center)
         .into()
     }
 }

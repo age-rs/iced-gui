@@ -1,25 +1,68 @@
-//! Write some text for your users to read.
+//! Text widgets display information through writing.
+//!
+//! # Example
+//! ```no_run
+//! # mod iced { pub mod widget { pub fn text<T>(t: T) -> iced_core::widget::Text<'static, iced_core::Theme, ()> { unimplemented!() } }
+//! #            pub use iced_core::color; }
+//! # pub type State = ();
+//! # pub type Element<'a, Message> = iced_core::Element<'a, Message, iced_core::Theme, ()>;
+//! use iced::widget::text;
+//! use iced::color;
+//!
+//! enum Message {
+//!     // ...
+//! }
+//!
+//! fn view(state: &State) -> Element<'_, Message> {
+//!     text("Hello, this is iced!")
+//!         .size(20)
+//!         .color(color!(0x0000ff))
+//!         .into()
+//! }
+//! ```
 use crate::alignment;
 use crate::layout;
 use crate::mouse;
 use crate::renderer;
-use crate::text::{self, Paragraph};
+use crate::text;
+use crate::text::paragraph::{self, Paragraph};
 use crate::widget::tree::{self, Tree};
 use crate::{
-    Color, Element, Layout, Length, Pixels, Point, Rectangle, Size, Widget,
+    Color, Element, Layout, Length, Pixels, Point, Rectangle, Size, Theme,
+    Widget,
 };
 
-use std::borrow::Cow;
+pub use text::{LineHeight, Shaping, Wrapping};
 
-pub use text::{LineHeight, Shaping};
-
-/// A paragraph of text.
+/// A bunch of text.
+///
+/// # Example
+/// ```no_run
+/// # mod iced { pub mod widget { pub fn text<T>(t: T) -> iced_core::widget::Text<'static, iced_core::Theme, ()> { unimplemented!() } }
+/// #            pub use iced_core::color; }
+/// # pub type State = ();
+/// # pub type Element<'a, Message> = iced_core::Element<'a, Message, iced_core::Theme, ()>;
+/// use iced::widget::text;
+/// use iced::color;
+///
+/// enum Message {
+///     // ...
+/// }
+///
+/// fn view(state: &State) -> Element<'_, Message> {
+///     text("Hello, this is iced!")
+///         .size(20)
+///         .color(color!(0x0000ff))
+///         .into()
+/// }
+/// ```
 #[allow(missing_debug_implementations)]
 pub struct Text<'a, Theme, Renderer>
 where
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
-    content: Cow<'a, str>,
+    fragment: text::Fragment<'a>,
     size: Option<Pixels>,
     line_height: LineHeight,
     width: Length,
@@ -28,17 +71,19 @@ where
     vertical_alignment: alignment::Vertical,
     font: Option<Renderer::Font>,
     shaping: Shaping,
-    style: Style<Theme>,
+    wrapping: Wrapping,
+    class: Theme::Class<'a>,
 }
 
 impl<'a, Theme, Renderer> Text<'a, Theme, Renderer>
 where
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     /// Create a new fragment of [`Text`] with the given contents.
-    pub fn new(content: impl Into<Cow<'a, str>>) -> Self {
+    pub fn new(fragment: impl text::IntoFragment<'a>) -> Self {
         Text {
-            content: content.into(),
+            fragment: fragment.into_fragment(),
             size: None,
             line_height: LineHeight::default(),
             font: None,
@@ -46,8 +91,9 @@ where
             height: Length::Shrink,
             horizontal_alignment: alignment::Horizontal::Left,
             vertical_alignment: alignment::Vertical::Top,
-            shaping: Shaping::Basic,
-            style: Style::default(),
+            shaping: Shaping::default(),
+            wrapping: Wrapping::default(),
+            class: Theme::default(),
         }
     }
 
@@ -71,24 +117,6 @@ where
         self
     }
 
-    /// Sets the style of the [`Text`].
-    pub fn style(mut self, style: fn(&Theme) -> Appearance) -> Self {
-        self.style = Style::Themed(style);
-        self
-    }
-
-    /// Sets the [`Color`] of the [`Text`].
-    pub fn color(mut self, color: impl Into<Color>) -> Self {
-        self.style = Style::Colored(Some(color.into()));
-        self
-    }
-
-    /// Sets the [`Color`] of the [`Text`], if `Some`.
-    pub fn color_maybe(mut self, color: Option<impl Into<Color>>) -> Self {
-        self.style = Style::Colored(color.map(Into::into));
-        self
-    }
-
     /// Sets the width of the [`Text`] boundaries.
     pub fn width(mut self, width: impl Into<Length>) -> Self {
         self.width = width.into();
@@ -101,21 +129,27 @@ where
         self
     }
 
+    /// Centers the [`Text`], both horizontally and vertically.
+    pub fn center(self) -> Self {
+        self.align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center)
+    }
+
     /// Sets the [`alignment::Horizontal`] of the [`Text`].
-    pub fn horizontal_alignment(
+    pub fn align_x(
         mut self,
-        alignment: alignment::Horizontal,
+        alignment: impl Into<alignment::Horizontal>,
     ) -> Self {
-        self.horizontal_alignment = alignment;
+        self.horizontal_alignment = alignment.into();
         self
     }
 
     /// Sets the [`alignment::Vertical`] of the [`Text`].
-    pub fn vertical_alignment(
+    pub fn align_y(
         mut self,
-        alignment: alignment::Vertical,
+        alignment: impl Into<alignment::Vertical>,
     ) -> Self {
-        self.vertical_alignment = alignment;
+        self.vertical_alignment = alignment.into();
         self
     }
 
@@ -124,15 +158,58 @@ where
         self.shaping = shaping;
         self
     }
+
+    /// Sets the [`Wrapping`] strategy of the [`Text`].
+    pub fn wrapping(mut self, wrapping: Wrapping) -> Self {
+        self.wrapping = wrapping;
+        self
+    }
+
+    /// Sets the style of the [`Text`].
+    #[must_use]
+    pub fn style(mut self, style: impl Fn(&Theme) -> Style + 'a) -> Self
+    where
+        Theme::Class<'a>: From<StyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as StyleFn<'a, Theme>).into();
+        self
+    }
+
+    /// Sets the [`Color`] of the [`Text`].
+    pub fn color(self, color: impl Into<Color>) -> Self
+    where
+        Theme::Class<'a>: From<StyleFn<'a, Theme>>,
+    {
+        self.color_maybe(Some(color))
+    }
+
+    /// Sets the [`Color`] of the [`Text`], if `Some`.
+    pub fn color_maybe(self, color: Option<impl Into<Color>>) -> Self
+    where
+        Theme::Class<'a>: From<StyleFn<'a, Theme>>,
+    {
+        let color = color.map(Into::into);
+
+        self.style(move |_theme| Style { color })
+    }
+
+    /// Sets the style class of the [`Text`].
+    #[cfg(feature = "advanced")]
+    #[must_use]
+    pub fn class(mut self, class: impl Into<Theme::Class<'a>>) -> Self {
+        self.class = class.into();
+        self
+    }
 }
 
 /// The internal state of a [`Text`] widget.
 #[derive(Debug, Default)]
-pub struct State<P: Paragraph>(P);
+pub struct State<P: Paragraph>(pub paragraph::Plain<P>);
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for Text<'a, Theme, Renderer>
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Text<'_, Theme, Renderer>
 where
+    Theme: Catalog,
     Renderer: text::Renderer,
 {
     fn tag(&self) -> tree::Tag {
@@ -140,7 +217,9 @@ where
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(State(Renderer::Paragraph::default()))
+        tree::State::new(State::<Renderer::Paragraph>(
+            paragraph::Plain::default(),
+        ))
     }
 
     fn size(&self) -> Size<Length> {
@@ -162,13 +241,14 @@ where
             limits,
             self.width,
             self.height,
-            &self.content,
+            &self.fragment,
             self.line_height,
             self.size,
             self.font,
             self.horizontal_alignment,
             self.vertical_alignment,
             self.shaping,
+            self.wrapping,
         )
     }
 
@@ -177,19 +257,25 @@ where
         tree: &Tree,
         renderer: &mut Renderer,
         theme: &Theme,
-        style: &renderer::Style,
+        defaults: &renderer::Style,
         layout: Layout<'_>,
         _cursor_position: mouse::Cursor,
         viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_ref::<State<Renderer::Paragraph>>();
+        let style = theme.style(&self.class);
 
-        let appearance = match self.style {
-            Style::Themed(f) => f(theme),
-            Style::Colored(color) => Appearance { color },
-        };
+        draw(renderer, defaults, layout, state.0.raw(), style, viewport);
+    }
 
-        draw(renderer, style, layout, state, appearance, viewport);
+    fn operate(
+        &self,
+        _state: &mut Tree,
+        layout: Layout<'_>,
+        _renderer: &Renderer,
+        operation: &mut dyn super::Operation,
+    ) {
+        operation.text(None, layout.bounds(), &self.fragment);
     }
 }
 
@@ -207,6 +293,7 @@ pub fn layout<Renderer>(
     horizontal_alignment: alignment::Horizontal,
     vertical_alignment: alignment::Vertical,
     shaping: Shaping,
+    wrapping: Wrapping,
 ) -> layout::Node
 where
     Renderer: text::Renderer,
@@ -228,6 +315,7 @@ where
             horizontal_alignment,
             vertical_alignment,
             shaping,
+            wrapping,
         });
 
         paragraph.min_bounds()
@@ -248,13 +336,12 @@ pub fn draw<Renderer>(
     renderer: &mut Renderer,
     style: &renderer::Style,
     layout: Layout<'_>,
-    state: &State<Renderer::Paragraph>,
-    appearance: Appearance,
+    paragraph: &Renderer::Paragraph,
+    appearance: Style,
     viewport: &Rectangle,
 ) where
     Renderer: text::Renderer,
 {
-    let State(ref paragraph) = state;
     let bounds = layout.bounds();
 
     let x = match paragraph.horizontal_alignment() {
@@ -280,7 +367,7 @@ pub fn draw<Renderer>(
 impl<'a, Message, Theme, Renderer> From<Text<'a, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
-    Theme: 'a,
+    Theme: Catalog + 'a,
     Renderer: text::Renderer + 'a,
 {
     fn from(
@@ -290,28 +377,9 @@ where
     }
 }
 
-impl<'a, Theme, Renderer> Clone for Text<'a, Theme, Renderer>
-where
-    Renderer: text::Renderer,
-{
-    fn clone(&self) -> Self {
-        Self {
-            content: self.content.clone(),
-            size: self.size,
-            line_height: self.line_height,
-            width: self.width,
-            height: self.height,
-            horizontal_alignment: self.horizontal_alignment,
-            vertical_alignment: self.vertical_alignment,
-            font: self.font,
-            style: self.style,
-            shaping: self.shaping,
-        }
-    }
-}
-
 impl<'a, Theme, Renderer> From<&'a str> for Text<'a, Theme, Renderer>
 where
+    Theme: Catalog + 'a,
     Renderer: text::Renderer,
 {
     fn from(content: &'a str) -> Self {
@@ -322,7 +390,7 @@ where
 impl<'a, Message, Theme, Renderer> From<&'a str>
     for Element<'a, Message, Theme, Renderer>
 where
-    Theme: 'a,
+    Theme: Catalog + 'a,
     Renderer: text::Renderer + 'a,
 {
     fn from(content: &'a str) -> Self {
@@ -330,37 +398,80 @@ where
     }
 }
 
-/// The apperance of some text.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Appearance {
+/// The appearance of some text.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Style {
     /// The [`Color`] of the text.
     ///
     /// The default, `None`, means using the inherited color.
     pub color: Option<Color>,
 }
 
-#[derive(Debug)]
-enum Style<Theme> {
-    Themed(fn(&Theme) -> Appearance),
-    Colored(Option<Color>),
+/// The theme catalog of a [`Text`].
+pub trait Catalog: Sized {
+    /// The item class of this [`Catalog`].
+    type Class<'a>;
+
+    /// The default class produced by this [`Catalog`].
+    fn default<'a>() -> Self::Class<'a>;
+
+    /// The [`Style`] of a class with the given status.
+    fn style(&self, item: &Self::Class<'_>) -> Style;
 }
 
-impl<Theme> Clone for Style<Theme> {
-    fn clone(&self) -> Self {
-        *self
+/// A styling function for a [`Text`].
+///
+/// This is just a boxed closure: `Fn(&Theme, Status) -> Style`.
+pub type StyleFn<'a, Theme> = Box<dyn Fn(&Theme) -> Style + 'a>;
+
+impl Catalog for Theme {
+    type Class<'a> = StyleFn<'a, Self>;
+
+    fn default<'a>() -> Self::Class<'a> {
+        Box::new(|_theme| Style::default())
+    }
+
+    fn style(&self, class: &Self::Class<'_>) -> Style {
+        class(self)
     }
 }
 
-impl<Theme> Copy for Style<Theme> {}
+/// The default text styling; color is inherited.
+pub fn default(_theme: &Theme) -> Style {
+    Style { color: None }
+}
 
-impl<Theme> Default for Style<Theme> {
-    fn default() -> Self {
-        Style::Colored(None)
+/// Text with the default base color.
+pub fn base(theme: &Theme) -> Style {
+    Style {
+        color: Some(theme.palette().text),
     }
 }
 
-impl<Theme> From<fn(&Theme) -> Appearance> for Style<Theme> {
-    fn from(f: fn(&Theme) -> Appearance) -> Self {
-        Style::Themed(f)
+/// Text conveying some important information, like an action.
+pub fn primary(theme: &Theme) -> Style {
+    Style {
+        color: Some(theme.palette().primary),
+    }
+}
+
+/// Text conveying some secondary information, like a footnote.
+pub fn secondary(theme: &Theme) -> Style {
+    Style {
+        color: Some(theme.extended_palette().secondary.strong.color),
+    }
+}
+
+/// Text conveying some positive information, like a successful event.
+pub fn success(theme: &Theme) -> Style {
+    Style {
+        color: Some(theme.palette().success),
+    }
+}
+
+/// Text conveying some negative information, like an error.
+pub fn danger(theme: &Theme) -> Style {
+    Style {
+        color: Some(theme.palette().danger),
     }
 }
